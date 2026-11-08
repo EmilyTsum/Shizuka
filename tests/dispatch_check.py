@@ -44,8 +44,12 @@ for start, size, adaptive, target, gate, match, resume in [
     assert ins[0].mnemonic == "cmp" and ins[0].op_str == "w8, #9"
     assert ins[1].mnemonic == "b.ne" and ins[1].operands[0].imm == address + 12
     assert ins[2].mnemonic == "b" and ins[2].operands[0].imm == match
-    assert ins[3].mnemonic == "cmp" and ins[3].op_str == (
-        "w8, #5" if start == 0x8561C4 else "w8, #3"
+    # Replaying the pristine comparison preserves the remaining stock branches.
+    # Raising the offload bound from 2 to 3 sends aptX HD into the low-codec arm.
+    original_cmp = list(old.md.disasm(old.read(gate, 4), gate))[0]
+    assert original_cmp.mnemonic == "cmp"
+    assert bytes(ins[3].bytes) == old.read(gate, 4), (
+        hex(gate), ins[3].op_str, original_cmp.op_str
     )
     assert ins[4].mnemonic == "b" and ins[4].operands[0].imm == resume
     print(

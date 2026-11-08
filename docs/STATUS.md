@@ -1,6 +1,7 @@
 # Status
 
 - Based on 0.6.0-test, with source formatting and build instructions prepared for publication.
+- aptX HD: fixed the LL offload trampoline replaying `cmp w8,#3` instead of the stock `#2`, which incorrectly routed HD into the unknown-codec branch and sent an empty controller START. The corrected build passes 40 stock/private ARM64 dispatch cases; BT-B10 now receives a valid HD START with controller status 0. BT-B10 HD indication and normal audio were confirmed by listening at 48 kHz/24-bit.
 - aptX LL: playback, codec round trips, and 44.1↔48 kHz switching were listening-tested with Motion+. Absolute latency has not been measured.
 - Adaptive: Air6 Pro playback at 48 kHz/HQ had no observed dropouts during listening tests. Dropouts at 44.1 kHz remain unresolved.
 - LE Audio: connection, display, and playback in both Air6 Pro earbuds were verified.

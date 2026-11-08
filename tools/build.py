@@ -128,7 +128,7 @@ for flavor, (name, functions) in SPEC.items():
                 " cmp w8, #9",
                 " .inst 0x54000041",
                 " .inst 0x14000000",
-                " cmp w8, #3",
+                " cmp w8, #2",
                 " .inst 0x14000000",
             ]
         (BUILD / (flavor + "-tramp.S")).write_text("\n".join(assembly) + "\n")

@@ -69,3 +69,8 @@ for name, files, flags in [
 env = dict(os.environ)
 if "--host-only" not in __import__("sys").argv:
     subprocess.run([__import__("sys").executable, str(r / "tools/build.py")], env=env, check=True)
+    subprocess.run(
+        [__import__("sys").executable, str(r / "tests/dispatch_emulation_check.py")],
+        env=env,
+        check=True,
+    )
