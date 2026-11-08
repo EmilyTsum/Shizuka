@@ -40,3 +40,10 @@ An existing timestamped producer-ring log can be summarized locally with `python
 See [PIPELINE.md](PIPELINE.md) for configuration, scheduling and buffering boundaries established by code inspection.
 
 A temporary accounting-wrapper experiment was rejected by DSP signature verification before it could run. The original wrapper was restored and its hash verified. No modified DSP library is installed. The built-in COP implementation is now being inspected offline from the original firmware.
+
+## Later counterchecks and repairs
+
+- The actual Adaptive graph includes SISO RAT before the encoder; matching ordinary-aptX graphs omit it. This explains why the two paths require separate investigation.
+- Actual firmware RAT intermediate conversion truncates integer kHz, but the final absolute deadline uses full Hz. The previous 441-sample timer trial cannot be dismissed merely because an intermediate field becomes 10022 µs. No 44000 Hz physical clock has been established.
+- A bounded 32-bit minHQ=256 trial changed the DSP's calculated adjustment to 210 ms; sound was normal but dropouts remained. It was reverted, including an exact original codec-plugin hash check. This was not a receiver-memory allocation test.
+- Reconfiguration retries and controller START/STOP ownership have been repaired separately. The latest HQ-default build passed a fresh Adaptive48/HQ listening check. These changes do not establish a 44.1 kHz dropout fix.

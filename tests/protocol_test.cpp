@@ -8,6 +8,12 @@
 #include "../src/settings.h"
 using namespace s25;
 int main() {
+    // Reconnect/startup must favor HQ until an explicit user preference arrives.
+    // Stability-first defaults must not remove the separate low-latency choice.
+    assert(kMode == 4096 && current_mode() == 4096);
+    assert(request_settings(kRate, 24, 8192) && current_mode() == 8192);
+    assert(request_settings(kRate, 24, 4096) && current_mode() == 4096);
+    consume_settings_change();
     const uint8_t peer[] = {1,    0,    7,    42,   0,    255,  0xd7, 0, 0, 0,    0xad, 0, 0xd1,
                             0x0a, 0x53, 0x53, 0xfa, 0x7d, 0x64, 0x7d, 0, 1, 0x87, 0,    0, 0x0f,
                             2,    3,    3,    3,    0,    0xaa, 0,    0, 0, 0,    0,    0, 0,

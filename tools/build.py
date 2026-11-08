@@ -154,7 +154,7 @@ for flavor, (name, functions) in SPEC.items():
     ]
     cmd += [
         "-DS25_RATE=" + os.environ.get("S25_RATE", "96000"),
-        "-DS25_MODE=" + os.environ.get("S25_MODE", "8192"),
+        "-DS25_MODE=" + os.environ.get("S25_MODE", "4096"),
         "-DS25_R2=" + os.environ.get("S25_R2", "3"),
     ]
     if flavor == "hal":

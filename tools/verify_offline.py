@@ -12,7 +12,7 @@ base = [
     "-fsanitize=address,undefined",
     "-DS25_R2=3",
     "-DS25_RATE=96000",
-    "-DS25_MODE=8192",
+    "-DS25_MODE=4096",
 ]
 jdk = Path(os.environ.get("JAVA_HOME", ""))
 jni = [

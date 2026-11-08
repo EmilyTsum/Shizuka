@@ -5,7 +5,7 @@
 #define S25_RATE 96000
 #endif
 #ifndef S25_MODE
-#define S25_MODE 8192
+#define S25_MODE 4096
 #endif
 #ifndef S25_R2
 #define S25_R2 1
