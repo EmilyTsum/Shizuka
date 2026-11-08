@@ -46,7 +46,10 @@ extern "C" __attribute__((visibility("default"))) const s25::State *s25_debug_st
 }
 #ifndef S25_HAL_ONLY
 static VscCallback start_callback, stop_callback;
-static uint8_t qti_active;
+// Ownership begins when START is submitted, not when its completion arrives.
+// The stack may cancel a pending start; keep that STOP in the same QTI protocol.
+static bool qti_owned, qti_start_pending, qti_stop_pending;
+static bool qti_stop_queued, qti_prior_owned, native_start_pending;
 static uint16_t start_mode = 4096;
 static void qti_response(VscComplete *p, VscCallback cb, uint8_t sub) {
     if (!cb)
@@ -55,25 +58,85 @@ static void qti_response(VscComplete *p, VscCallback cb, uint8_t sub) {
     VscComplete mapped{0xfd5d, 2, bytes};
     cb(&mapped);
 }
+static bool qti_success(VscComplete *p) {
+    return p && p->length && p->bytes && p->bytes[0] == 0;
+}
+static void qti_stop_response(VscComplete *p) {
+    // A failed stop does not establish that the controller released its stream.
+    if (qti_success(p))
+        qti_owned = false;
+    qti_stop_pending = false;
+    auto cb = stop_callback;
+    stop_callback = nullptr;
+    qti_response(p, cb, 2);
+}
+static void qti_send_stop() {
+    uint8_t command[2] = {5, 0};
+    tramp_vendor(0xfc0a, 2, command, qti_stop_response);
+}
 static void qti_start_response(VscComplete *p) {
-    qti_active = p && p->length && p->bytes && p->bytes[0] == 0;
-    if (qti_active) {
-        // Required by the QTI start sequence: DSP init alone does not set controller sideband mode.
+    bool stopping = qti_stop_queued;
+    qti_start_pending = false;
+    qti_stop_queued = false;
+    // A failed fresh START cannot create ownership, even when cancellation was queued.
+    // A failed replacement START must not forget an already running QTI stream.
+    qti_owned = qti_success(p) || qti_prior_owned;
+    if (qti_success(p) && !stopping) {
         // VS_QHCI_ENCODER_MODE_CHANGE, one TLV, encoder-mode id5, uint16 HQ/LL.
         uint8_t mode[6] = {0x13, 1, 5, 2, uint8_t(start_mode), uint8_t(start_mode >> 8)};
         tramp_vendor(0xfc0a, 6, mode, nullptr);
     }
-    qti_response(p, start_callback, 1);
+    auto cb = start_callback;
+    start_callback = nullptr;
+    qti_response(p, cb, 1);
+    // Deliver START before STOP, and do not issue a late mode update after cancellation.
+    if (stopping)
+        qti_send_stop();
 }
-static void qti_stop_response(VscComplete *p) {
-    qti_active = 0;
-    qti_response(p, stop_callback, 2);
+// A native codec can replace a QTI stream after a failed STOP or link recovery.
+// Transfer protocol ownership only when that native START actually succeeds.
+static void native_start_response(VscComplete *p) {
+    bool stopping = qti_stop_queued;
+    native_start_pending = false;
+    qti_stop_queued = false;
+    if (qti_success(p))
+        qti_owned = false;
+    auto cb = start_callback;
+    start_callback = nullptr;
+    if (cb)
+        cb(p);
+    if (stopping) {
+        if (qti_owned)
+            qti_send_stop();
+        else {
+            uint8_t command = 2;
+            tramp_vendor(0xfd5d, 1, &command, qti_stop_response);
+        }
+    }
+}
+static void native_start(uint8_t n, uint8_t *p, VscCallback cb) {
+    if (!qti_owned) {
+        tramp_vendor(0xfd5d, n, p, cb);
+        return;
+    }
+    start_callback = cb;
+    native_start_pending = true;
+    tramp_vendor(0xfd5d, n, p, native_start_response);
+}
+static void qti_busy(VscCallback cb, uint8_t sub) {
+    uint8_t status = 0x0c; // HCI Command Disallowed: another stream transaction owns the slot.
+    VscComplete event{0xfc0a, 1, &status};
+    qti_response(&event, cb, sub);
 }
 extern "C" void s25_vendor(uint16_t opcode, uint8_t n, uint8_t *p, VscCallback cb) {
     if (opcode == 0xfd5d && p && n == 57 && p[0] == 1) {
+        if (qti_start_pending || native_start_pending || qti_stop_pending) {
+            qti_busy(cb, 1);
+            return;
+        }
         uint8_t ll_command[57];
         if (s25::ll::offload_start(p, n, ll_command)) {
-            tramp_vendor(opcode, n, ll_command, cb);
+            native_start(n, ll_command, cb);
             return;
         }
         uint8_t command[66];
@@ -85,14 +148,26 @@ extern "C" void s25_vendor(uint16_t opcode, uint8_t n, uint8_t *p, VscCallback c
         }
         if (count) {
             start_callback = cb;
+            qti_prior_owned = qti_owned;
+            qti_owned = qti_start_pending = true;
             tramp_vendor(0xfc0a, (uint8_t)count, command, qti_start_response);
             return;
         }
+        native_start(n, p, cb);
+        return;
     }
-    if (opcode == 0xfd5d && p && n && p[0] == 2 && qti_active) {
-        uint8_t command[2] = {5, 0};
+    if (opcode == 0xfd5d && p && n && p[0] == 2 &&
+        (qti_owned || qti_start_pending || native_start_pending || qti_stop_pending)) {
+        if (qti_stop_pending) {
+            qti_busy(cb, 2);
+            return;
+        }
         stop_callback = cb;
-        tramp_vendor(0xfc0a, 2, command, qti_stop_response);
+        qti_stop_pending = true;
+        if (qti_start_pending || native_start_pending)
+            qti_stop_queued = true;
+        else
+            qti_send_stop();
         return;
     }
     tramp_vendor(opcode, n, p, cb);
@@ -204,7 +279,9 @@ extern "C" bool s25_to_hal(uint8_t *out, void *codec) {
         a->buffering[i] = i % 2 ? 50 : 20;
         a->ttp[i] = (int8_t)(selected[11 + i] - 128);
     }
-    // Stability-first Lossless request. R2.1+ vendor packing doubles the max (100 -> 200 ms).
+    // Lossless HQ bounds request, not measured buffering. R2.1 packing doubles
+    // the max field, but the inspected DSP INIT ignores maxHQ; min60 is below
+    // its observed TTP candidate and does not establish added playout delay.
     if (s25::flags_mode(((uint8_t *)codec)[0x1ad]) == s25::kModeLossless) {
         a->buffering[2] = 60;
         a->buffering[3] = 100;

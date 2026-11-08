@@ -10,6 +10,8 @@
 - The KernelSU WebUI shows Android's active media route and codec selection, independently of DSP observations. It does not enable DSP logging.
 - Status snapshots were checked on-device for Adaptive 44.1 kHz/24-bit, Lossless selection 44.1 kHz/16-bit, and LE Audio LC3 48 kHz/16-bit. WebUI rendering and unavailable/stale-state behavior have host checks. See [44KHZ.md](44KHZ.md) for the investigation's measurements and limits.
 - Ineffective experimental DSP timer, PCM width, and transport clock changes are excluded.
-- The APK is rebuilt from your stock copy. The publication build's generated artifacts have not received a new device listening test. Full-reboot behavior is also unverified.
+- The current reconfiguration repair was applied with exact APK/native/HAL hash checks. Adaptive 96 kHz/24-bit/HQ and 48 kHz/24-bit/HQ after 44.1→48 and identical 48 kHz reapplication were listening-tested with Air6 Pro. LL, LE Audio and full reboot were not retested on this generation.
+- Explicit Adaptive/Lossless retries now renew the private configuration revision, including unchanged requested values; default/startup vectors remain idempotent. Lossless also bypasses Java's unchanged-feeding early return. Controller START/STOP ownership and pending callbacks survive cancellation and failed STOP. These repairs are not a verified fix for the 44.1 kHz click or every intermittent silent change.
+- Android's A2DP playback flag can clear after reconfiguration while the HAL still feeds audio and the user hears normal playback. It must not trigger automatic recovery or be presented as proof of silence.
 
 Reports should include the commit, phone/firmware, receiver, codec/sample rate, and symptoms. Remove device identifiers before publishing raw logs.

@@ -214,7 +214,12 @@ extern "C" s25::Vector s25_prepare(JNIEnv *env, jobjectArray configs) {
             // Lossless's public 16-bit value describes CD precision, not the DSP PCM container.
             // Normalize the UI alias here; all native/HAL/DSP input remains PCM24.
             int bits = lossless ? 24 : b ? (b == 2 ? 24 : b == 1 ? 16 : 0) : 24;
-            if (!s25::request_settings(hz, bits, selected_mode)) {
+            // Samsung consumes local restart flags before asynchronous HAL/AVDTP application.
+            // A retry must traverse its deferred device reconfigure path even when our desired
+            // values already match. Only an explicit user selection gets a fresh HD clock;
+            // startup/capability vectors retain idempotent settings.
+            bool retryable = *(uint32_t *)(p + 4) == 1000000 && (r || mode || lossless);
+            if (!s25::request_settings(hz, bits, selected_mode, retryable)) {
                 *(uint32_t *)p = 1000000;
                 continue;
             }

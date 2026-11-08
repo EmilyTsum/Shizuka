@@ -138,6 +138,14 @@ public class BtStatus {
             // Device addresses are deliberately omitted from UI and copied snapshots.
             j.put("device", d.getName() == null ? "Bluetooth device" : d.getName());
             j.put("transport", id == 22 ? "LE Audio" : "A2DP");
+            if (id == 2) {
+                try {
+                    j.put("stream_started", call(profile, "isA2dpPlaying",
+                                                 new Class<?>[] {BluetoothDevice.class}, d));
+                } catch (Exception e) {
+                    error("A2DP stream state", e);
+                }
+            }
             try {
                 Object c;
                 if (id == 22) {

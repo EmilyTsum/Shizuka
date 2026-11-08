@@ -15,7 +15,8 @@ int proxy_rate();
 int current_rate();
 int current_bits();
 int current_mode();
-bool request_settings(int rate, int bits, int mode);
+// Explicit user retries need a new private clock even if the desired values match.
+bool request_settings(int rate, int bits, int mode, bool reconfigure = false);
 bool consume_settings_change();
 constexpr int kRate = S25_RATE, kMode = S25_MODE, kR2 = S25_R2;
 constexpr uint8_t kWireRate = kRate == 96000 ? 0xa0 : kRate == 44100 ? 0x40 : 0x10;

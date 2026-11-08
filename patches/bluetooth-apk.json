@@ -50,12 +50,12 @@
     {
       "path": "smali/com/android/bluetooth/a2dp/A2dpCodecConfig.smali",
       "before_sha256": "80f887d8f3e419ac73fc9184f8fb667270f71904bb2fa1ca87764478c8b3a2df",
-      "after_sha256": "5ead8da752a15d820df41609673763cba981eee74c7f16ab6af86a32b23871d0",
+      "after_sha256": "f067a88ea04ef22ae18f4eda3d53a4d80a6fe0c2a32d2a7592eb417a80af510e",
       "edits": [
         {
           "line": 1428,
           "delete": 0,
-          "insert": "    invoke-virtual {p3}, Landroid/bluetooth/BluetoothCodecConfig;->getCodecType()I\n\n    move-result v1\n\n    const/4 v2, 0x7\n\n    if-eq v1, v2, :cond_4\n\n"
+          "insert": "    invoke-virtual {p3}, Landroid/bluetooth/BluetoothCodecConfig;->getCodecType()I\n\n    move-result v1\n\n    const/4 v2, 0x7\n\n    if-eq v1, v2, :cond_4\n\n    const/16 v2, 0xc\n\n    if-eq v1, v2, :cond_4\n\n"
         }
       ]
     }

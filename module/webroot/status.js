@@ -43,6 +43,8 @@ function render(snapshot) {
     text("bits", codec ? numbers(codec.bit_depths, " bit") : "—");
     text("mode-label", route.transport === "LE Audio" ? "Frame duration" : "Mode");
     text("mode", codec ? codec.mode || numbers(codec.frame_durations_us, " µs") : "—");
+    text("stream", device && typeof device.stream_started === "boolean" ? (device.stream_started ? "Set" : "Clear") : "Not reported");
+    text("audio-mode", ({0: "Normal", 1: "Ringtone", 2: "In call", 3: "Communication", 4: "Call screening"})[route.audio_mode] || "Not reported");
     text("selection-note", codec && codec.type === 12 && route.transport === "A2DP" ? "Lossless is selected in Android. Its 16-bit display does not describe the DSP PCM input or confirm lossless transmission." : "The Android selection is separate from the DSP input format and actual radio transmission.");
     const dsp = snapshot.dsp || {};
     byId("dsp-values").hidden = !dsp.available;
@@ -65,7 +67,7 @@ async function refresh() {
     byId("refresh").disabled = true;
     text("state", "Reading…");
     try { render(await execStatus()); }
-    catch (error) { text("state", "Unavailable"); text("message", error.message || "Status is unavailable."); lastStatus = null; byId("copy").disabled = true; text("transport", "—"); text("device", "No current snapshot"); text("codec", "Not reported"); ["rate", "bits", "mode"].forEach((id) => text(id, "—")); byId("dsp-values").hidden = true; text("dsp-note", "No current DSP observation."); }
+    catch (error) { text("state", "Unavailable"); text("message", error.message || "Status is unavailable."); lastStatus = null; byId("copy").disabled = true; text("transport", "—"); text("device", "No current snapshot"); text("codec", "Not reported"); ["rate", "bits", "mode", "stream", "audio-mode"].forEach((id) => text(id, "—")); byId("dsp-values").hidden = true; text("dsp-note", "No current DSP observation."); }
     finally { busy = false; byId("refresh").disabled = false; }
 }
 byId("refresh").addEventListener("click", refresh);

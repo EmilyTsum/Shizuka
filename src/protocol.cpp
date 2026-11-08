@@ -20,7 +20,7 @@ int current_mode() {
     uint32_t v = __atomic_load_n(&settings_word, __ATOMIC_ACQUIRE);
     return (v & 8) ? 12288 : (v & 4) ? 8192 : 4096;
 }
-bool request_settings(int rate, int bits, int mode) {
+bool request_settings(int rate, int bits, int mode, bool reconfigure) {
     if (mode == 12288 && kR2 == 3)
         rate = 44100;
     if ((rate != 48000 && rate != 96000 && !(kR2 == 3 && rate == 44100)) || bits != 24 ||
@@ -33,7 +33,7 @@ bool request_settings(int rate, int bits, int mode) {
                      : mode == 12288 ? 8u
                                      : 0u);
     uint32_t old = __atomic_load_n(&settings_word, __ATOMIC_ACQUIRE);
-    while ((old & 15) != word) {
+    while (reconfigure || (old & 15) != word) {
         uint32_t next = word | ((old ^ 16) & 16);
         if (__atomic_compare_exchange_n(&settings_word, &old, next, false, __ATOMIC_ACQ_REL,
                                         __ATOMIC_ACQUIRE)) {

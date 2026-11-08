@@ -1,4 +1,4 @@
-# 44.1 kHz investigation
+# Adaptive stability investigation
 
 The periodic click remains unresolved. Keep 48 kHz/HQ as the listening-tested stability option; it is not Lossless.
 
@@ -15,10 +15,12 @@ The periodic click remains unresolved. Keep 48 kHz/HQ as the listening-tested st
 ## Code inspection
 
 - The resynchronization setter stores analysis counters; it does not itself convert 44.1 kHz into a 27-second timer. Their downstream effects remain unverified.
+- The separate `incTtp` / `decTtp` counters trigger at 700, but their callers require system mode 2 (R3) or 6 (legacy), excluding HQ modes 3/7. Multiplying 700 by a 38 ms HQ interval does not explain the reported HQ click.
 - A dedicated 44.1 kHz HQ configuration exists. Absence of literal `44100` comparisons in the encoder core is not evidence that a 48 kHz table is selected.
 - ENCLEVEL 3 uses a 38 ms interval, which corresponds to 1675.8 samples per channel at 44.1 kHz. Fractional accounting deserves inspection, but the second marked click occurred at ENCLEVEL 4's exact 30 ms / 1323-sample interval. The 38 ms rounding hypothesis alone does not explain all observed clicks.
 - Some input/output debug strings belong to the older encoder path. Their absence from an R3 capture cannot establish that no input data was dropped.
-- The core has queued-input alignment and exposes `aptX3Encode_GetAnalysisProcessed`. Queued-input setup includes an eight-unit conversion for larger buffers. If each packet discarded rather than retained fractional/alignment remainders, both 30 ms (1323→1320) and 38 ms (1675.8→1672) could lose 100 samples per second. This is a conditional arithmetic model, not a measured loss: the input queue may retain those samples. Trace actual processed counts and wrapper timestamp advancement before changing intervals or padding PCM.
+- The core and wrapper explicitly retain remainders. The wrapper copies unread raw PCM from the core-updated cursor back to the input-buffer base; the core separately moves unused analysis-band data at chunk completion. Simple per-packet loss of `N mod 8` samples is unsupported. Queue residues must not be labeled cumulative PCM loss.
+- Original signed-wrapper captures show a repeatable timing discrepancy: 3,006 consecutive 44.1 kHz/30 ms packet records regress to 1319.999 samples per packet, while nominal frame-length metadata is 1323. A separate capture gives 1320.008. The 96 kHz control follows its nominal duration within about 3 ppm. This is a strong scheduling/accounting lead, but not yet proof of decoded sample count or audible causality: the downstream COP consumer may apply its own correction.
 - Lossless selection has not been verified as actual lossless transmission. Recorded encoder feedback reported QHS=0 and ENCLEVEL 3/4; these observations are not a bit-perfect test.
 
 ## Remaining boundary
@@ -26,3 +28,15 @@ The periodic click remains unresolved. Keep 48 kHz/HQ as the listening-tested st
 Measure sample consumption and packet presentation timestamps across the R3 wrapper, DSP transport and controller, alongside receiver/link-quality counters. The ordinary Android vendor-command API rejects the reserved BQR command, including at the Bluetooth service. No raw command was injected outside the stack's command queue. No speculative timing patch is included.
 
 An existing timestamped producer-ring log can be summarized locally with `python tools/analyze_encoder_log.py LOG --markers MARKERS`. This parser does not enable diagnostics or collect device data. Raw captures are not distributed.
+
+## Additional observations
+
+- A user also reported intermittent interruption followed by watery/compression-like artifacts at 96 kHz/24-bit. This was inferred from sound, not a bitrate display. A subsequent stable 90-second recording contained 4,461 consecutive dispatches per channel and no logged discontinuity. Encoder target bitrate changed during that stable interval; target changes alone do not establish a failure.
+- HAL bitrate fields, the stock library's hardcoded 192000 callback, and padded DSP packet sizes are not measured codec or radio bitrate.
+- Legacy 48/96 kHz and R3 44.1 kHz use different encoder implementations. A logged 96→44.1→48 kHz test unloaded R3, initialized the legacy encoder at 48 kHz, and received successful controller acknowledgements. The user reported normal sound. Intermittent silence on other single, slow changes remains unresolved; selecting the codec again reportedly restores it.
+- DSP headers at 96 kHz contain timing-offset components of 187/197 ms. They are not receiver buffer occupancy or an acoustic latency measurement. Quick pause/stop response is inconclusive because stopping can flush queued audio. The receiver's game mode was off.
+- LE scanning remained enabled in HCI traces, with advertising reports continuing after the earlier global scan-setting experiment. RF coexistence was therefore not fully excluded. No recurring 27-second scan/retry command sequence was found.
+
+See [PIPELINE.md](PIPELINE.md) for configuration, scheduling and buffering boundaries established by code inspection.
+
+A temporary accounting-wrapper experiment was rejected by DSP signature verification before it could run. The original wrapper was restored and its hash verified. No modified DSP library is installed. The built-in COP implementation is now being inspected offline from the original firmware.
