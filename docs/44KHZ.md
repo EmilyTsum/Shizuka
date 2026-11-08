@@ -60,3 +60,7 @@ A later fixed-tone test reproduced the reported click at Adaptive 44.1 kHz/HQ wh
 | 48 kHz control | 20.66 s | 399/400 | 399 | 50.00/s |
 
 Snapshots were about 50 ms apart. Invalid/racing reads were excluded, not counted as empty buffers. Used slots mean reserved or DSP-unacknowledged host memory; they do not specify remaining playable samples or earbud latency. No sampled sustained host-to-DSP starvation was observed. Shorter excursions between samples remain possible, and an ACK does not prove correct downstream audio. This shifts the next observation point toward conversion, encoder output and downstream delivery. Codec rate alone must not be substituted for the actual RAT/input media format.
+
+The signed R3 wrapper’s `decideScaleToLossless` requires 44,100 Hz and reported QHS support equal to 1, along with generation/configuration and Wi-Fi conditions. QHS=0 blocks this particular scale-up path; 44.1 kHz alone does not force Lossless. The ordinary HQ and separate Lossless selections both reach DSP HQ mode with different requests/constraints; neither proves actual lossless radio transmission. The semantic label of another required configuration word remains unconfirmed.
+
+A fresh feedback capture without DSP binary or property changes collected no current QHS measurement because the daemon did not watch the chosen FARF directory. The temporary configuration was removed. Historical QHS=0 must not be presented as current telemetry.
