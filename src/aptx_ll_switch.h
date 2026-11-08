@@ -66,6 +66,25 @@ class SwitchGate {
         return false;
     }
 
+    static bool hd_config(const uint8_t *p, size_t len) {
+        if (len < 2)
+            return false;
+        for (size_t i = 2; i + 2 <= len;) {
+            size_t n = p[i + 1];
+            if (n > len - i - 2)
+                return false;
+            if (p[i] == 7 && n == 13) {
+                auto *c = p + i + 2;
+                // Genuine aptX HD only. Adaptive's private HD-shaped proxy is
+                // translated before this hook, but must never match if present.
+                return c[0] == 0 && c[1] == 255 && c[2] == 0xd7 && !c[3] && !c[4] && !c[5] &&
+                       c[6] == 0x24 && !c[7] && !(c[9] == 0xa5 && c[10] == 0xad);
+            }
+            i += n + 2;
+        }
+        return false;
+    }
+
   public:
     constexpr SwitchGate() = default;
     constexpr explicit SwitchGate(SwitchOps ops) : ops_(ops) {}
@@ -109,11 +128,15 @@ class SwitchGate {
         if (event != 3)
             return ops_.send(ccb, buffer);
         bool next_ll = ll_config((uint8_t *)buffer + 8 + h[2], h[1]);
-        bool delay = n->closed && (n->last_ll || next_ll);
+        bool next_hd = hd_config((uint8_t *)buffer + 8 + h[2], h[1]);
+        bool delay = n->closed && (n->last_ll || next_ll || next_hd);
         n->last_ll = next_ll;
         n->closed = false;
         // No command timer has started yet. Let media L2CAP teardown run on the same
         // main loop before the next SetConfiguration (observed response ~126 ms).
+        // BT-B10 also rejects genuine HD with BAD_STATE when SetConfiguration
+        // precedes the old media L2CAP disconnection response. Its identical HD
+        // configuration succeeds after teardown; reuse this bounded guard.
         if (delay && !n->buffer && p[0x15c0] && *(void **)(p + 0x15a8)) {
             if (!n->alarm)
                 n->alarm = ops_.create_alarm();
