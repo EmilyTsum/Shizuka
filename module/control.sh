@@ -7,6 +7,15 @@ BB=/data/adb/ksu/bin/busybox
 log() { echo "s25_aptx_adaptive: $*"; }
 fail() { log "$*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail 'root required'
+# Android mksh can mark numeric shell FDs close-on-exec; run every flock
+# under the fixed KernelSU ash binary. Inspect executable identity, not an
+# inherited environment flag, so ordinary `sh control.sh` is safe too.
+bb_exe=$("$BB" readlink -f "$BB")
+shell_exe=$("$BB" readlink -f "/proc/$$/exe")
+[ -n "$bb_exe" ] && [ -n "$shell_exe" ] || { echo 'Cannot identify shell executable' >&2;exit 1; }
+if [ "$shell_exe" != "$bb_exe" ];then
+ exec "$BB" sh "$0" "$@"
+fi
 STATE="$MODDIR/state"
 NATIVE=/apex/com.android.bt/lib64/libbluetooth_jni.so
 HAL=/vendor/lib64/libsehbluetooth_audio_session_aidl.so

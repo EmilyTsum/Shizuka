@@ -29,6 +29,15 @@ owned() {
 # or alternative filesystem root is accepted by the installed entrypoint.
 [ "$(id -u)" = 0 ] || bad 'root required'
 [ -x "$BB" ] || bad 'busybox missing'
+# Android mksh can mark numeric shell FDs close-on-exec; run every flock
+# under the fixed KernelSU ash binary. Inspect executable identity, not an
+# inherited environment flag, so ordinary `sh control.sh` is safe too.
+bb_exe=$("$BB" readlink -f "$BB")
+shell_exe=$("$BB" readlink -f "/proc/$$/exe")
+[ -n "$bb_exe" ] && [ -n "$shell_exe" ] || { echo 'Cannot identify shell executable' >&2;exit 1; }
+if [ "$shell_exe" != "$bb_exe" ];then
+ exec "$BB" sh "$0" "$@"
+fi
 if [ "$(readlink /proc/self/ns/mnt)" != "$(readlink /proc/1/ns/mnt)" ];then
  exec "$BB" nsenter -t 1 -m -- "$BB" sh "$0" "$@"
 fi

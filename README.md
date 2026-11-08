@@ -2,7 +2,7 @@
 
 Experimental Bluetooth extensions for Galaxy S25: aptX Adaptive/LL integration, a separate Lossless selection, and LE Audio connection and display fixes.
 
-**SM-S931Z / S931ZSCU1DZIF only.** Stock input hashes must match. QHS-enabled Lossless passed a short Air6 Pro transmission and listening test; intermittent Lossless dropouts are still being investigated. Selecting Lossless does not confirm actual lossless transmission.
+**SM-S931Z / S931ZSCU1DZIF only.** Stock input hashes must match. QHS-enabled Lossless passed a short Air6 Pro transmission and listening test; a possible brief initial interruption remains under observation. Selecting Lossless does not confirm actual lossless transmission.
 
 ## Build
 
@@ -19,7 +19,7 @@ pip install -r requirements.txt
 python tools/build_all.py
 ```
 
-Output: `dist/Shizuka-DZIF-0.7.0-test.zip`. Install through KernelSU, then use the module's Action button to apply it. New builds have no audio verification proof and run as a 15-minute trial with automatic rollback. To restore manually:
+Output: `dist/Shizuka-DZIF-0.7.1-test.zip`. Install through KernelSU, then use the module's Action button to apply it. New builds have no audio verification proof and run as a 15-minute trial with automatic rollback. To restore manually:
 
 ```sh
 su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'

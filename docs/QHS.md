@@ -35,4 +35,4 @@ Required 24-bit DSP input and the 16-bit Android Lossless display are retained. 
 
 Adaptive 96 kHz/24-bit/HQ was also tested with QHS enabled. The legacy encoder accepted 96 kHz and received QHS1; quality feedback rose 3→4→5 with no recorded downward step or backlog bitrate reduction. The final continuous encoder segment was about 24 seconds; the user reported normal audio without dropouts or abnormal noise. This remains a short test, not a long-term radio delivery guarantee.
 
-Residual intermittent Lossless dropouts (roughly 40 seconds or longer) are still reported during later listening. QHS enablement is not a complete fix for every timing or audio-delivery issue.
+Later listening was reported as strongly stable after a possible brief initial interruption. A marked replay contained a 64.8-second continuous Lossless run; the single uncertain marker had no nearby QHS/encoder-state change. A periodic fault has not been established. Long-term and receiver-specific behavior remain under observation.

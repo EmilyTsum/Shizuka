@@ -1,6 +1,6 @@
 # Status
 
-- 0.7.0-test adds optional exact-profile QHS controller enablement to the existing codec fixes.
+- 0.7.1-test retains optional QHS enablement and fixes ordinary Android sh compatibility for lifecycle locks.
 - aptX HD: fixed the LL offload trampoline replaying `cmp w8,#3` instead of the stock `#2`, which incorrectly routed HD into the unknown-codec branch and sent an empty controller START. The corrected build passes 40 stock/private ARM64 dispatch cases; BT-B10 now receives a valid HD START with controller status 0. BT-B10 HD indication and normal audio were confirmed by listening at 48 kHz/24-bit.
 - BT-B10 also rejected some aptX-to-HD switches with AVDTP BAD_STATE while the old media L2CAP channel was still closing. Genuine HD SetConfiguration now uses the existing bounded teardown guard; private Adaptive proxy and unrelated codec paths are excluded. BT-B10 aptX→HD and HD→Adaptive→HD selections passed on-device; final HD audio and switching were confirmed by the user.
 - aptX LL: playback, codec round trips, and 44.1↔48 kHz switching were listening-tested with Motion+. Absolute latency has not been measured.
@@ -19,6 +19,6 @@
 
 Reports should include the commit, phone/firmware, receiver, codec/sample rate, and symptoms. Remove device identifiers before publishing raw logs.
 
-The integrated QHS module passed on-device enable → rollback → re-enable checks: actual local controller features FC → CC → FC, with original NVM restored during rollback. The final integrated generation also accepted 96 kHz offload START; negotiated PHY was not separately sampled in that final generation. The DSP and listening evidence above was acquired with the same two-bit input in controlled trials. Full reboot reapplication remains untested.
+The integrated QHS module passed on-device enable → rollback → re-enable checks: actual local controller features FC → CC → FC, with original NVM restored during rollback. The final integrated generation also accepted 96 kHz offload START; negotiated PHY was not separately sampled in that final generation. The DSP and listening evidence above was acquired with the same two-bit input in controlled trials. Full reboot reapplication remains untested. The 0.7.1 shell entry guard passed actual plain-sh FD7/FD8 checks while Bluetooth/audio PIDs remained unchanged.
 
-Residual Lossless dropouts at roughly 40 seconds or longer remain under investigation even with QHS enabled. The short fixed-tone passes do not establish that this issue is resolved.
+Later listening was generally stable after a possible initial brief interruption. The marked replay maintained Lossless for 64.8 seconds and showed no encoder/QHS change near its single uncertain marker. A repeating 40-second fault is not established.

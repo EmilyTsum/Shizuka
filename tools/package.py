@@ -75,7 +75,7 @@ def main():
     ]:
         shutil.copy2(src, stage / name)
     DIST.mkdir(exist_ok=True)
-    output = DIST / "Shizuka-DZIF-0.7.0-test.zip"
+    output = DIST / "Shizuka-DZIF-0.7.1-test.zip"
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(stage.rglob("*")):
             if path.is_file():

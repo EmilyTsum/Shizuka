@@ -5,7 +5,7 @@ Set target_address in config.example.conf to your bonded device's address.
 Settings are parsed as key=value data, never executed as shell.
 Adaptive defaults to 48 kHz / 24-bit / HQ for stability.
 QHS-enabled Lossless passed a short Air6 Pro transmission and listening test.
-Intermittent Lossless dropouts and long-term stability remain under test.
+A possible brief initial interruption and long-term stability remain under test.
 
 Module Action starts an unverified build as a 15-minute rollback trial.
 Do not copy another build's audio verification proofs.
