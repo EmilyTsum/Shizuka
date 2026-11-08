@@ -1,0 +1,13 @@
+/build/
+/inputs/
+/dist/
+/evidence/
+/.venv/
+__pycache__/
+*.pyc
+*.dSYM/
+.DS_Store
+/module/proofs/*
+/module/policy.dex
+/module/payloads.sha256
+/module/policy.sha256

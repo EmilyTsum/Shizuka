@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "path": "smali/com/android/bluetooth/Utils$DualModeAudioSetting.smali",
+      "before_sha256": "f12e4c88f4ba6f4b587c20782b36a41f58b04b127a337d3c26984790fca777de",
+      "after_sha256": "dc0b29fd6cf50ac0ab0a6b8ba1a1cb6d25d5a838e83182e092e0fdf69ec1157e",
+      "edits": [
+        {
+          "line": 34,
+          "delete": 1,
+          "insert": "    const/4 v1, 0x1\n"
+        }
+      ]
+    },
+    {
+      "path": "smali/com/android/bluetooth/btservice/AdapterService.smali",
+      "before_sha256": "3fcfeea4bf69520bcff51f9d1a76558199b6cf8ff0660e1de563cf8bb6eb9654",
+      "after_sha256": "7962dd340dce6b820352b116f3cc0afd8d0d4c394f80c82a0d87e0f839479fdb",
+      "edits": [
+        {
+          "line": 4336,
+          "delete": 0,
+          "insert": "    return-void\n.end method\n\n.method private s25CompletePreferredRequest(Landroid/os/Bundle;)V\n    .locals 5\n\n    if-eqz p1, :cond_2\n\n    iget-object v0, p0, Lcom/android/bluetooth/btservice/AdapterService;->mCsipGroupsPendingAudioProfileChanges:Ljava/util/Map;\n\n    monitor-enter v0\n\n    :try_start_0\n    invoke-interface {v0}, Ljava/util/Map;->values()Ljava/util/Collection;\n\n    move-result-object v1\n\n    invoke-interface {v1}, Ljava/util/Collection;->iterator()Ljava/util/Iterator;\n\n    move-result-object v1\n\n    :cond_0\n    :goto_0\n    invoke-interface {v1}, Ljava/util/Iterator;->hasNext()Z\n\n    move-result v2\n\n    if-eqz v2, :cond_1\n\n    invoke-interface {v1}, Ljava/util/Iterator;->next()Ljava/lang/Object;\n\n    move-result-object v2\n\n    check-cast v2, Lcom/android/bluetooth/btservice/AdapterService$PendingAudioProfilePreferenceRequest;\n\n    iget-object v3, v2, Lcom/android/bluetooth/btservice/AdapterService$PendingAudioProfilePreferenceRequest;->preferences:Landroid/os/Bundle;\n\n    if-ne v3, p1, :cond_0\n\n    invoke-interface {v1}, Ljava/util/Iterator;->remove()V\n\n    goto :goto_0\n\n    :cond_1\n    monitor-exit v0\n    :try_end_0\n    .catchall {:try_start_0 .. :try_end_0} :catchall_0\n\n    goto :goto_1\n\n    :catchall_0\n    move-exception v4\n\n    monitor-exit v0\n\n    throw v4\n\n    :cond_2\n    :goto_1\n"
+        },
+        {
+          "line": 24990,
+          "delete": 0,
+          "insert": "    invoke-direct {p0, p2}, Lcom/android/bluetooth/btservice/AdapterService;->s25CompletePreferredRequest(Landroid/os/Bundle;)V\n\n"
+        }
+      ]
+    },
+    {
+      "path": "smali/com/android/bluetooth/btservice/ActiveDeviceManager.smali",
+      "before_sha256": "dba4429abc151a90898a071939c552eb1eed9ea4c6a772551f84e21697f6af6f",
+      "after_sha256": "22f6e98d7c48c4c81da5dcc863126b6f0214d06a19b553d57e8a4104cabaac86",
+      "edits": [
+        {
+          "line": 860,
+          "delete": 0,
+          "insert": "    if-eqz p1, :cond_1\n\n"
+        },
+        {
+          "line": 3015,
+          "delete": 0,
+          "insert": "    if-eqz p1, :cond_2\n\n"
+        }
+      ]
+    },
+    {
+      "path": "smali/com/android/bluetooth/a2dp/A2dpCodecConfig.smali",
+      "before_sha256": "80f887d8f3e419ac73fc9184f8fb667270f71904bb2fa1ca87764478c8b3a2df",
+      "after_sha256": "5ead8da752a15d820df41609673763cba981eee74c7f16ab6af86a32b23871d0",
+      "edits": [
+        {
+          "line": 1428,
+          "delete": 0,
+          "insert": "    invoke-virtual {p3}, Landroid/bluetooth/BluetoothCodecConfig;->getCodecType()I\n\n    move-result v1\n\n    const/4 v2, 0x7\n\n    if-eq v1, v2, :cond_4\n\n"
+        }
+      ]
+    }
+  ]
+}

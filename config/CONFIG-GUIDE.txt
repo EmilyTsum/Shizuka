@@ -1,0 +1,14 @@
+Shizuka / DZIF test
+
+External settings: /data/adb/s25_bluetooth/config.conf
+Edit target_address in config.example.conf to your bonded device's address.
+The file is parsed as key=value data, never executed as shell.
+Adaptive defaults to 48kHz / 24bit / HQ for stability.
+44.1kHz clicks remain unresolved. Lossless transmission is unverified.
+
+Module Action starts an unverified build as a 900-second rollback trial.
+Do not copy another build's audio verification proofs.
+Manual restore:
+  su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'
+
+Only exact stock hashes in profile.json are supported.
