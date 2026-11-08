@@ -40,6 +40,12 @@ public class BtConfig {
         final boolean trusted;
         Config(boolean trusted) { this.trusted = trusted; }
     }
+    static String configValue(Map<String, String> c, String key) {
+        if ("classic_qhs_host_aware".equals(key))
+            return ClassicQhsPolicy.trustedOptInValue(c.get(key),
+                                                      c instanceof Config && ((Config)c).trusted);
+        return c.get(key);
+    }
     static void say(String s) { System.out.println(s); }
     static Map<String, String> read(Path path) throws Exception {
         // Hold the exact opened regular file. Do not authorize a global controller
@@ -386,7 +392,7 @@ public class BtConfig {
         if (action.equals("value")) {
             if (args.length != 3 || !ALLOWED.contains(args[2]))
                 throw new IllegalArgumentException("value KEY");
-            say(c.get(args[2]));
+            say(configValue(c, args[2]));
             return;
         }
         if (action.equals("get")) {

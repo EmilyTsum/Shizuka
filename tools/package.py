@@ -29,6 +29,8 @@ def main():
         "ui_callback",
         "layout_stability",
         "classic_qhs_policy",
+        "controller_features",
+        "qhs_nvm",
     }
     if (
         len(tests) != len(required_tests)
@@ -73,7 +75,7 @@ def main():
     ]:
         shutil.copy2(src, stage / name)
     DIST.mkdir(exist_ok=True)
-    output = DIST / "Shizuka-DZIF-0.6.0-test.zip"
+    output = DIST / "Shizuka-DZIF-0.7.0-test.zip"
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(stage.rglob("*")):
             if path.is_file():

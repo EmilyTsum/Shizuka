@@ -4,7 +4,8 @@ External settings: /data/adb/s25_bluetooth/config.conf
 Set target_address in config.example.conf to your bonded device's address.
 Settings are parsed as key=value data, never executed as shell.
 Adaptive defaults to 48 kHz / 24-bit / HQ for stability.
-44.1 kHz dropouts remain unresolved. Actual lossless transmission is unverified.
+QHS-enabled Lossless passed a short Air6 Pro transmission and listening test.
+Intermittent Lossless dropouts and long-term stability remain under test.
 
 Module Action starts an unverified build as a 15-minute rollback trial.
 Do not copy another build's audio verification proofs.
@@ -13,10 +14,12 @@ Manual restore:
 
 Only unmodified stock files matching the hashes in profile.json are supported.
 
-classic_qhs_host_aware=false (default): no controller request.
-Set true only in a root-owned regular config file, not writable by group/others,
-to request Classic QHS host-aware mode once per observed Bluetooth/service startup.
-Acceptance is logged as a request result; negotiated QHS remains unverified.
-False stops future requests and does not undo a previously accepted request.
-After setting false, controller restart with the unchanged module restores normal startup policy.
-The watcher runs after Bluetooth is ON; it does not guarantee negotiation before auto-connect.
+classic_qhs_host_aware=false (default): no QHS NVM overlay or startup request.
+Set true only in a root-owned regular config file, not writable by group/others.
+Module activation then enables two tested DZIF controller NVM bits and requests
+Classic QHS host-aware mode once per observed Bluetooth/service startup.
+Re-activate the module after changing the option; restarting the watcher alone
+does not apply/remove the NVM overlay. Bluetooth must be ON for activation.
+Rollback removes the owned overlay and verifies original controller capabilities.
+config.sh controller-features reports local capabilities, not negotiated QHS.
+Peer support and radio conditions determine actual QHS/Lossless operation.

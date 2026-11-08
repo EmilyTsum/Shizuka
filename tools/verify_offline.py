@@ -86,6 +86,36 @@ print(policy_result.stdout.strip())
 results.append(
     {"test": "classic_qhs_policy", "passed": True, "output": policy_result.stdout.strip()}
 )
+subprocess.run(
+    [
+        str(jdk / "bin/javac"),
+        "-d",
+        str(policy_classes),
+        str(r / "tools/ControllerFeaturesSchema.java"),
+        str(r / "tests/ControllerFeaturesTest.java"),
+    ],
+    check=True,
+)
+features_result = subprocess.run(
+    [str(jdk / "bin/java"), "-cp", str(policy_classes), "ControllerFeaturesTest"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+print(features_result.stdout.strip())
+results.append(
+    {"test": "controller_features", "passed": True, "output": features_result.stdout.strip()}
+)
+nvm_result = subprocess.run(
+    [__import__("sys").executable, str(r / "tests/qhs_nvm_test.py")],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+print(nvm_result.stdout.strip() + nvm_result.stderr.strip())
+results.append(
+    {"test": "qhs_nvm", "passed": True, "output": (nvm_result.stdout + nvm_result.stderr).strip()}
+)
 (r / "evidence/ll-offline-tests.json").write_text(
     json.dumps(results, ensure_ascii=False, indent=2) + "\n"
 )

@@ -108,6 +108,8 @@ def build_policy(tools, android):
             str(classes),
             str(ROOT / "tools/BtConfig.java"),
             str(ROOT / "tools/ClassicQhsPolicy.java"),
+            str(ROOT / "tools/ControllerFeatures.java"),
+            str(ROOT / "tools/ControllerFeaturesSchema.java"),
         ],
         check=True,
     )

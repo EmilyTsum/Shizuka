@@ -29,6 +29,17 @@ final class ClassicQhsPolicyTest {
         public void report(String value) { reports.add(value); }
     }
     static void security() {
+        check(ClassicQhsPolicy.trustedOptInValue("true", true).equals("true"));
+        check(ClassicQhsPolicy.trustedOptInValue("false", true).equals("false"));
+        check(ClassicQhsPolicy.trustedOptInValue("true", false).equals("false"));
+        check(ClassicQhsPolicy.trustedOptInValue(null, true).equals("false"));
+        // A parsed true must not authorize the NVM path when FD metadata fails trust.
+        for (int uid : new int[] {0, 1, 1000, 2000})
+            for (int mode : new int[] {0100600, 0100620, 0100602, 0100666, 0120600}) {
+                boolean trusted = ClassicQhsPolicy.secureConfig(uid, mode);
+                check(ClassicQhsPolicy.trustedOptInValue("true", trusted)
+                          .equals(uid == 0 && mode == 0100600 ? "true" : "false"));
+            }
         for (int mode : new int[] {0100600, 0100640, 0100644, 0100400})
             check(ClassicQhsPolicy.secureConfig(0, mode));
         for (int mode :

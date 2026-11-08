@@ -14,12 +14,17 @@ case "${1:-get}" in
    rm -f "$MODDIR/state/policy.pid"
   fi;exit 0;;
 esac
-[ -f "$CONFIG" ] || { echo "Missing $CONFIG; copy config.example.conf and set target_address" >&2;exit 1; }
+if [ "${1:-get}" != controller-features ];then
+ [ -f "$CONFIG" ] || { echo "Missing $CONFIG; copy config.example.conf and set target_address" >&2;exit 1; }
+fi
 expected=$(cat "$MODDIR/policy.sha256")
 actual=$("$BB" sha256sum "$MODDIR/policy.dex");actual=${actual%% *}
 [ "$actual" = "$expected" ] || { echo 'policy.dex hash mismatch' >&2;exit 1; }
 export CLASSPATH="$MODDIR/policy.dex"
 case "${1:-get}" in
+ controller-features)
+  [ "$#" = 1 ] || { echo 'controller-features takes no arguments' >&2;exit 64; }
+  exec app_process /system/bin ControllerFeatures;;
  watch)
   [ -f "$MODDIR/state/active" ] || { echo 'module not active' >&2;exit 1; }
   exec app_process /system/bin BtConfig "$CONFIG" watch;;
@@ -34,5 +39,5 @@ case "${1:-get}" in
   echo $! > "$MODDIR/state/policy.pid";;
  get|value|validate|set|apply|apply-transport|apply-adaptive|apply-permissions)
   exec app_process /system/bin BtConfig "$CONFIG" "$@";;
- *) echo 'usage: config.sh get|validate|set KEY VALUE|apply|apply-transport|apply-adaptive|start|stop' >&2;exit 1;;
+ *) echo 'usage: config.sh get|validate|set KEY VALUE|apply|apply-transport|apply-adaptive|controller-features|start|stop' >&2;exit 1;;
 esac

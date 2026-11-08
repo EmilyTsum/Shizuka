@@ -86,16 +86,31 @@ check_payloads() {
  done < "$MODDIR/payloads.sha256"
  [ "$count" = 4 ] || fail 'incomplete payload manifest'
 }
-rollback() {
+qhs_pending() { [ -e "$STATE/qhs-nvm/intent" ] || [ -e "$STATE/qhs-nvm/restoring" ]; }
+qhs_features() {
+ "$BB" sh "$MODDIR/config.sh" controller-features > "$STATE/qhs-controller-features.json"
+ "$BB" grep -Eq '"local_enabled"[[:space:]]*:[[:space:]]*'"$1"'([,}[:space:]])' "$STATE/qhs-controller-features.json" || fail 'controller QHS local capability readback mismatch'
+ case "$1" in true) qhs_hex=1c7d7ffc31;;false) qhs_hex=1c7d7fcc31;;*) return 1;;esac
+ "$BB" grep -Eq '"features_hex"[[:space:]]*:[[:space:]]*"'"$qhs_hex"'"' "$STATE/qhs-controller-features.json" || fail 'controller feature bytes differ from tested profile'
+
+}
+rollback() (
+ # Never inherit activation cleanup traps into the serialized recovery shell.
+ trap - EXIT HUP INT TERM
  [ -d "$STATE" ] || { log 'inactive';return; }
- if [ ! -f "$STATE/active" ] && [ ! -f "$STATE/armed" ] && [ ! -s "$STATE/mounts.tsv" ];then check_inputs;log 'already inactive; stock hashes match';return;fi
+ [ ! -L "$STATE" ] || fail 'unsafe state symlink'
+ [ ! -L "$STATE/rollback.lock" ] || fail 'unsafe rollback lock'
+ exec 7> "$STATE/rollback.lock"
+ "$BB" flock 7
+ if [ ! -f "$STATE/active" ] && [ ! -f "$STATE/armed" ] && [ ! -s "$STATE/mounts.tsv" ] && ! qhs_pending;then check_inputs;log 'already inactive; stock hashes match';return;fi
  if [ -f "$MODDIR/config.sh" ];then "$BB" sh "$MODDIR/config.sh" stop || true;fi
- rm -f "$STATE/armed" "$STATE/health-token"
- quiesce_radio || true
- if [ -f "$STATE/watchdog.pid" ];then
-  old_watch=$(cat "$STATE/watchdog.pid")
-  if [ -f "/proc/$old_watch/cmdline" ] && "$BB" tr '\000' ' ' < "/proc/$old_watch/cmdline" | grep -F "$MODDIR/watchdog.sh" >/dev/null;then kill -TERM "$old_watch" 2>/dev/null || true;fi
+ rm -f "$STATE/health-token"
+ qhs_restoring=0
+ if qhs_pending;then
+  "$BB" sh "$MODDIR/qhs-nvm.sh" remove || return 1
+  qhs_restoring=1
  fi
+ quiesce_radio || true
  if [ -s "$STATE/mounts.tsv" ]; then
   "$BB" tac "$STATE/mounts.tsv" | while IFS=' ' read -r mount_pid mount_ns target; do
    [ -e "/proc/$mount_pid/ns/mnt" ] || continue
@@ -150,12 +165,24 @@ rollback() {
  done
  [ -z "$current_bt" ] || kill -TERM $current_bt 2>/dev/null || true
  sleep 3
+ if [ "$qhs_restoring" = 1 ];then "$BB" sh "$MODDIR/qhs-nvm.sh" scan-restore;fi
  resume_radio
+ if [ "$qhs_restoring" = 1 ];then
+  qhs_features false
+  "$BB" sh "$MODDIR/qhs-nvm.sh" finish-remove
+ fi
  rm -f "$STATE/active"
  check_inputs
  : > "$STATE/mounts.tsv"
+ # Keep recovery armed until owned NVM + running controller + native cleanup
+ # all verify. The subshell lock serializes manual/watchdog rollback attempts.
+ rm -f "$STATE/armed"
+ if [ -f "$STATE/watchdog.pid" ];then
+  old_watch=$(cat "$STATE/watchdog.pid")
+  if [ -f "/proc/$old_watch/cmdline" ] && "$BB" tr '\000' ' ' < "/proc/$old_watch/cmdline" | grep -F "$MODDIR/watchdog.sh" >/dev/null;then kill -TERM "$old_watch" 2>/dev/null || true;fi
+ fi
  log 'verified stock hashes after unmount; restored properties and restarted audio/Bluetooth'
-}
+)
 case "${1:-status}" in
  status)
   if [ -f "$STATE/active" ];then
@@ -191,7 +218,10 @@ case "${1:-status}" in
    actual=$(nsrun "$zpid" "$BB" sha256sum "$path");actual=${actual%% *}
    [ "$actual" = "$digest" ] || fail "zygote namespace mismatch: $path"
   done < "$MODDIR/inputs.sha256"
-  mkdir -p "$STATE";: > "$STATE/mounts.tsv"
+  [ ! -L "$STATE" ] || fail 'unsafe state symlink'
+  if [ -d "$STATE" ];then [ "$("$BB" stat -c '%u' "$STATE")" = 0 ] || fail 'unsafe state owner';fi
+  (umask 077; mkdir -p "$STATE");chmod 0700 "$STATE"
+  : > "$STATE/mounts.tsv"
   rm -f "$STATE/hci-and-audio-verified"
   if dumpsys bluetooth_manager | "$BB" awk '/^  State:/ {print $2}' | grep -qx ON;then echo 1 > "$STATE/radio-on";else echo 0 > "$STATE/radio-on";fi
   getprop persist.vendor.qcom.bluetooth.aptxadaptiver2_1_support > "$STATE/r21"
@@ -214,6 +244,12 @@ case "${1:-status}" in
   echo $! > "$STATE/watchdog.pid"
   trap 'rollback' HUP INT TERM
   trap 'code=$?;if [ "$code" != 0 ];then rollback;fi' EXIT
+  qhs_enabled=false
+  if [ -f /data/adb/s25_bluetooth/config.conf ];then qhs_enabled=$("$BB" sh "$MODDIR/config.sh" value classic_qhs_host_aware);fi
+  if [ "$qhs_enabled" = true ];then
+   [ "$(cat "$STATE/radio-on")" = 1 ] || fail 'QHS activation requires Bluetooth ON for capability readback'
+   "$BB" sh "$MODDIR/qhs-nvm.sh" apply
+  fi
   quiesce_radio || fail 'Bluetooth did not enter OFF state before HAL restart'
   # Labels match the original inodes; never create a new target path.
   chown 0:0 "$MODDIR/payload/"*.so "$MODDIR/payload/"*.apk;chmod 0444 "$MODDIR/payload/"*.so "$MODDIR/payload/"*.apk
@@ -267,6 +303,7 @@ case "${1:-status}" in
   [ "$hal_ready" = 1 ] || fail 'audio HAL factory readiness timeout'
   old_bt=$(host_bt || true)
   [ -z "$old_bt" ] || kill -TERM $old_bt 2>/dev/null || true
+  if [ "$qhs_enabled" = true ];then "$BB" sh "$MODDIR/qhs-nvm.sh" scan-restore;fi
   resume_radio
   loaded=0
   attempt=0
@@ -298,6 +335,7 @@ case "${1:-status}" in
   # Future applications and Bluetooth restarts inherit the stock parent view.
   nsrun "$zpid" "$BB" umount -l "$NATIVE"
   nsrun "$zpid" "$BB" umount -l "$APK"
+  if [ "$qhs_enabled" = true ];then qhs_features true;fi
   touch "$STATE/active"
   log "loaded experiment; watchdog will restore stock after $trial_seconds seconds unless committed"
   ;;

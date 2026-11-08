@@ -20,6 +20,9 @@ final class ClassicQhsPolicy {
     static boolean secureConfig(int uid, int mode) {
         return uid == 0 && (mode & 0170000) == 0100000 && (mode & 0022) == 0;
     }
+    static String trustedOptInValue(String configured, boolean trusted) {
+        return trusted && "true".equals(configured) ? "true" : "false";
+    }
     static boolean fixedRequest(byte[] p) {
         return p != null && p.length == 3 && p[0] == 1 && p[1] == 0 && p[2] == 3;
     }
