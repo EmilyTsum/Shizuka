@@ -12,3 +12,11 @@ Manual restore:
   su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'
 
 Only unmodified stock files matching the hashes in profile.json are supported.
+
+classic_qhs_host_aware=false (default): no controller request.
+Set true only in a root-owned regular config file, not writable by group/others,
+to request Classic QHS host-aware mode once per observed Bluetooth/service startup.
+Acceptance is logged as a request result; negotiated QHS remains unverified.
+False stops future requests and does not undo a previously accepted request.
+After setting false, controller restart with the unchanged module restores normal startup policy.
+The watcher runs after Bluetooth is ON; it does not guarantee negotiation before auto-connect.

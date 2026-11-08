@@ -18,7 +18,23 @@ def sha(data):
 
 def main():
     tests = json.loads((ROOT / "evidence/ll-offline-tests.json").read_text())
-    if len(tests) != 9 or not all(test["passed"] for test in tests):
+    required_tests = {
+        "ll_switch",
+        "aptx_ll",
+        "ll_native_protocol",
+        "ll_ui_registration",
+        "protocol",
+        "peer_negotiation",
+        "vendor",
+        "ui_callback",
+        "layout_stability",
+        "classic_qhs_policy",
+    }
+    if (
+        len(tests) != len(required_tests)
+        or {test["test"] for test in tests} != required_tests
+        or not all(test["passed"] for test in tests)
+    ):
         raise SystemExit("Run tools/verify_offline.py before packaging.")
     manifest = json.loads((BUILD / "patch-manifest.json").read_text())
     expected = {

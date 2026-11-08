@@ -3,6 +3,10 @@ import android.bluetooth.*;
 import android.content.*;
 import android.os.*;
 import java.nio.file.*;
+import java.io.*;
+import android.system.*;
+import java.lang.reflect.*;
+import java.util.concurrent.Executor;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -19,6 +23,7 @@ public class BtConfig {
                                   "adaptive_priority",
                                   "aptx_hd_priority",
                                   "aptx_voice_enabled",
+                                  "classic_qhs_host_aware",
                                   "media_allowed",
                                   "calls_allowed",
                                   "le_audio_allowed"};
@@ -30,12 +35,53 @@ public class BtConfig {
     static boolean watching;
     static final Map<Integer, BluetoothProfile> profiles = new HashMap<>();
     static boolean initialApplied;
+    static ClassicQhsPolicy qhsPolicy;
+    static final class Config extends LinkedHashMap<String, String> {
+        final boolean trusted;
+        Config(boolean trusted) { this.trusted = trusted; }
+    }
     static void say(String s) { System.out.println(s); }
     static Map<String, String> read(Path path) throws Exception {
-        if (Files.size(path) > 8192)
-            throw new IllegalArgumentException("config too large");
-        Map<String, String> c = new LinkedHashMap<>();
-        for (String raw : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+        // Hold the exact opened regular file. Do not authorize a global controller
+        // request using a symlink or a path-only owner check followed by a new open.
+        FileDescriptor fd = Os.open(path.toString(),
+                                    OsConstants.O_RDONLY | OsConstants.O_CLOEXEC |
+                                        OsConstants.O_NOFOLLOW | OsConstants.O_NONBLOCK,
+                                    0);
+        FileInputStream input = null;
+        String text;
+        boolean trusted;
+        try {
+            StructStat before = Os.fstat(fd);
+            if ((before.st_mode & OsConstants.S_IFMT) != OsConstants.S_IFREG ||
+                before.st_size > 8192)
+                throw new IllegalArgumentException("config is not a bounded regular file");
+            input = new FileInputStream(fd);
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[1024];
+            int n;
+            while ((n = input.read(buffer)) != -1) {
+                if (bytes.size() + n > 8192)
+                    throw new IllegalArgumentException("config too large");
+                bytes.write(buffer, 0, n);
+            }
+            StructStat after = Os.fstat(fd);
+            trusted = android.os.Process.myUid() == 0 &&
+                      ClassicQhsPolicy.secureConfig(before.st_uid, before.st_mode) &&
+                      ClassicQhsPolicy.secureConfig(after.st_uid, after.st_mode) &&
+                      before.st_dev == after.st_dev && before.st_ino == after.st_ino;
+            text = new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+        } finally {
+            if (input != null)
+                input.close();
+            else
+                Os.close(fd);
+        }
+        return parse(text, trusted);
+    }
+    static Map<String, String> parse(String text, boolean trusted) {
+        Map<String, String> c = new Config(trusted);
+        for (String raw : text.split("\\r\\n|\\r|\\n")) {
             String line = raw.trim();
             if (line.isEmpty() || line.startsWith("#"))
                 continue;
@@ -49,6 +95,7 @@ public class BtConfig {
         // Schema 1 files from 0.3 retain all user values; the new independent HD key has a default.
         c.putIfAbsent("aptx_hd_priority", "4001");
         c.putIfAbsent("aptx_voice_enabled", "false");
+        c.putIfAbsent("classic_qhs_host_aware", "false");
         validate(c);
         return c;
     }
@@ -69,6 +116,7 @@ public class BtConfig {
         choice(c, "adaptive_apply_on_connect", "true", "false");
         choice(c, "adaptive_rate", "44100", "48000", "96000");
         choice(c, "aptx_voice_enabled", "true", "false");
+        choice(c, "classic_qhs_host_aware", "true", "false");
         choice(c, "adaptive_bits",
                "24"); // DSP input contract: PCM24/32; explicit PCM16 corrupts audio.
         choice(c, "adaptive_mode", "hq", "ll", "lossless");
@@ -109,6 +157,72 @@ public class BtConfig {
         context = ((Context)at.getMethod("getSystemContext").invoke(thread))
                       .createPackageContext("com.android.shell", 0);
         adapter = context.getSystemService(BluetoothManager.class).getAdapter();
+    }
+    static void qhs(Map<String, String> c) {
+        if (qhsPolicy != null)
+            qhsPolicy.update(adapter.isEnabled(), "true".equals(c.get("classic_qhs_host_aware")),
+                             c instanceof Config && ((Config)c).trusted);
+    }
+    static void startQhsPolicy(Handler handler) {
+        qhsPolicy = new ClassicQhsPolicy(new ClassicQhsPolicy.Ops() {
+            Object callback;
+            Method unregister;
+            public long nowNanos() { return System.nanoTime(); }
+            public void report(String value) { say(value); }
+            public void register(long token) throws Exception {
+                if (android.os.Process.myUid() != 0 || !adapter.isEnabled())
+                    throw new IllegalStateException("root and initialized adapter required");
+                Class<?> api = Class.forName(
+                    "android.bluetooth.BluetoothAdapter$BluetoothHciVendorSpecificCallback");
+                callback = Proxy.newProxyInstance(
+                    api.getClassLoader(), new Class<?>[] {api}, (proxy, method, args) -> {
+                        switch (method.getName()) {
+                        case "hashCode":
+                            return System.identityHashCode(proxy);
+                        case "equals":
+                            return proxy == args[0];
+                        case "toString":
+                            return "ClassicQhsPolicyCallback";
+                        case "onCommandComplete":
+                            qhsPolicy.complete(token, (Integer)args[0],
+                                               args[1] == null ? null : ((byte[])args[1]).clone());
+                            break;
+                        case "onCommandStatus":
+                            if ((Integer)args[1] != 0)
+                                qhsPolicy.complete(token, (Integer)args[0],
+                                                   new byte[] {((Integer)args[1]).byteValue()});
+                            break;
+                        default:
+                            break;
+                        }
+                        return null;
+                    });
+                unregister = BluetoothAdapter.class.getMethod(
+                    "unregisterBluetoothHciVendorSpecificCallback", api);
+                Executor executor = task -> handler.post(task);
+                BluetoothAdapter.class
+                    .getMethod("registerBluetoothHciVendorSpecificCallback", Set.class,
+                               Executor.class, api)
+                    .invoke(adapter, Collections.emptySet(), executor, callback);
+            }
+            public void send(byte[] request) throws Exception {
+                if (android.os.Process.myUid() != 0 || !adapter.isEnabled() ||
+                    !ClassicQhsPolicy.fixedRequest(request))
+                    throw new IllegalStateException("invalid fixed QHS request");
+                BluetoothAdapter.class
+                    .getMethod("sendBluetoothHciVendorSpecificCommand", int.class, byte[].class)
+                    .invoke(adapter, ClassicQhsPolicy.OCF, request);
+            }
+            public void unregister() throws Exception {
+                Object old = callback;
+                callback = null;
+                if (old != null)
+                    unregister.invoke(adapter, old);
+            }
+            public void armTimeout(long token) {
+                handler.postDelayed(() -> qhsPolicy.timeout(token), 5000);
+            }
+        });
     }
     static void transport(Map<String, String> c) throws Exception {
         BluetoothDevice d = target(c);
@@ -301,17 +415,30 @@ public class BtConfig {
         watching = action.equals("watch");
         Handler handler = new Handler(Looper.getMainLooper());
         if (watching) {
+            startQhsPolicy(handler);
             // Reload on route changes, without responding to codec updates (avoids a feedback
             // loop).
             IntentFilter events =
                 new IntentFilter("android.bluetooth.a2dp.profile.action.ACTIVE_DEVICE_CHANGED");
+            events.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
             events.addAction("android.bluetooth.action.LE_AUDIO_CONNECTION_STATE_CHANGED");
             events.addAction("android.bluetooth.action.LE_AUDIO_ACTIVE_DEVICE_CHANGED");
             context.registerReceiver(new BroadcastReceiver() {
                 public void onReceive(Context ctx, Intent intent) {
                     BluetoothDevice d = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                     try {
+                        // Expire acceptance even when the config was removed or became invalid.
+                        if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(intent.getAction()) &&
+                            intent.getIntExtra(BluetoothAdapter.EXTRA_STATE,
+                                               BluetoothAdapter.ERROR) !=
+                                BluetoothAdapter.STATE_ON) {
+                            qhsPolicy.serviceLost();
+                            return;
+                        }
                         Map<String, String> latest = read(file);
+                        qhs(latest);
+                        if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(intent.getAction()))
+                            return;
                         if ("android.bluetooth.action.LE_AUDIO_ACTIVE_DEVICE_CHANGED".equals(
                                 intent.getAction())) {
                             adaptive(latest);
@@ -330,6 +457,7 @@ public class BtConfig {
                     }
                 }
             }, events, Context.RECEIVER_EXPORTED);
+            qhs(c); // Receiver is registered before inspecting an already-ON adapter.
             say("policy_watch=ready");
         } else
             handler.postDelayed(() -> {
@@ -339,8 +467,15 @@ public class BtConfig {
         BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
             public void onServiceConnected(int p, BluetoothProfile proxy) {
                 profiles.put(p, proxy);
-                if (p == 2)
+                if (p == 2) {
                     a2dp = proxy;
+                    if (watching)
+                        try {
+                            qhs(read(file));
+                        } catch (Exception e) {
+                            say("qhs_policy_error=" + e);
+                        }
+                }
                 if (profiles.size() != 3 || initialApplied)
                     return;
                 initialApplied = true;
@@ -356,8 +491,11 @@ public class BtConfig {
             }
             public void onServiceDisconnected(int p) {
                 profiles.remove(p);
-                if (p == 2)
+                if (p == 2) {
                     a2dp = null;
+                    if (qhsPolicy != null)
+                        qhsPolicy.serviceLost();
+                }
             }
         };
         for (int profile : new int[] {2, 1, 22})

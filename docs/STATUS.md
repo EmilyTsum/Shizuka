@@ -6,6 +6,7 @@
 - aptX LL: playback, codec round trips, and 44.1↔48 kHz switching were listening-tested with Motion+. Absolute latency has not been measured.
 - Adaptive: Air6 Pro playback at 48 kHz/HQ had no observed dropouts during listening tests. Dropouts at 44.1 kHz remain unresolved.
 - LE Audio: connection, display, and playback in both Air6 Pro earbuds were verified.
+- QHS: optional trusted startup requests now validate exact controller acceptance, including after Bluetooth off/on. Controlled Air6 Pro measurements still reported QHS0 and ordinary HQ, including with multipoint off. Actual QHS/Lossless activation remains unresolved; see [QHS.md](QHS.md).
 - Lossless: a separate selection and 44.1 kHz/16-bit display are implemented. Required 24-bit DSP input is retained. Actual lossless transmission is unverified.
 - Logs showed ENCLEVEL 3↔4 transitions, but their causal relationship to dropouts is unconfirmed. Changing the resynchronization timer did not help.
 - A physical click marker also occurred after about 46 seconds at unchanged ENCLEVEL 4, with consecutive encoder packet numbers around the marker. Level changes are not necessary for every reported click; encoded content, downstream timing and radio delivery are still unverified.

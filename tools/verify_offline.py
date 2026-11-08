@@ -63,6 +63,29 @@ for name, files, flags in [
     res = subprocess.run([str(out)], check=True, capture_output=True, text=True)
     print(name + ": " + res.stdout.strip())
     results.append({"test": name, "passed": True, "output": res.stdout.strip()})
+# The controller request policy is pure Java; exercise async epochs without Android or HCI.
+policy_classes = r / "build/policy-host-tests"
+policy_classes.mkdir(parents=True, exist_ok=True)
+subprocess.run(
+    [
+        str(jdk / "bin/javac"),
+        "-d",
+        str(policy_classes),
+        str(r / "tools/ClassicQhsPolicy.java"),
+        str(r / "tests/ClassicQhsPolicyTest.java"),
+    ],
+    check=True,
+)
+policy_result = subprocess.run(
+    [str(jdk / "bin/java"), "-cp", str(policy_classes), "ClassicQhsPolicyTest"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+print(policy_result.stdout.strip())
+results.append(
+    {"test": "classic_qhs_policy", "passed": True, "output": policy_result.stdout.strip()}
+)
 (r / "evidence/ll-offline-tests.json").write_text(
     json.dumps(results, ensure_ascii=False, indent=2) + "\n"
 )

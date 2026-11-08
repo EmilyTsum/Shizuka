@@ -107,6 +107,7 @@ def build_policy(tools, android):
             "-d",
             str(classes),
             str(ROOT / "tools/BtConfig.java"),
+            str(ROOT / "tools/ClassicQhsPolicy.java"),
         ],
         check=True,
     )

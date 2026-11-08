@@ -30,3 +30,5 @@ Host tests only: `python tools/verify_offline.py --host-only` (`JAVA_HOME` requi
 Codec status: open the module's **WebUI** (`<>`) in KernelSU. It shows the current media route and Android codec selection. Refresh is read-only; optional automatic refresh starts off. Lossless selection is not proof of lossless transmission.
 
 GPL-2.0-only. The license covers this repository's code and modifications, not your proprietary stock files.
+
+Optional Classic QHS startup requests and measured Lossless limitations: [QHS.md](docs/QHS.md). Controller acceptance is separate from actual QHS operation.
