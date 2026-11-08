@@ -1,12 +1,12 @@
-# 動作状況
+# Status
 
-- ベースは0.6.0-test。公開用に整形・ビルド手順を整理したものです。
-- aptX LL：Motion+で再生、コーデック往復、44.1↔48kHz変更を試聴確認。絶対遅延の実測はありません。
-- Adaptive：Air6 Proの48kHz/HQは試聴時に途切れなし。44.1kHzは音切れが未解決です。
-- LE Audio：Air6 Proで接続・表示と両耳の再生を確認。
-- Lossless：独立した選択肢と44.1kHz/16bit表示を実装。DSP入力は必要な24bitを維持。実際のロスレス伝送は未確認です。
-- 調査ログではENCLEVELの3↔4遷移を観測しましたが、音切れとの因果関係は確定していません。再同期タイマー変更も改善しませんでした。
-- 効果のなかったDSPタイマー・PCM幅・クロック指定の比較変更は含みません。
-- APKは手元の原本から再構築します。公開用ビルドの生成物は、新しい実機試聴を行っていません。フル再起動後の動作も未検証です。
+- Based on 0.6.0-test, with source formatting and build instructions prepared for publication.
+- aptX LL: playback, codec round trips, and 44.1↔48 kHz switching were listening-tested with Motion+. Absolute latency has not been measured.
+- Adaptive: Air6 Pro playback at 48 kHz/HQ had no observed dropouts during listening tests. Dropouts at 44.1 kHz remain unresolved.
+- LE Audio: connection, display, and playback in both Air6 Pro earbuds were verified.
+- Lossless: a separate selection and 44.1 kHz/16-bit display are implemented. Required 24-bit DSP input is retained. Actual lossless transmission is unverified.
+- Logs showed ENCLEVEL 3↔4 transitions, but their causal relationship to dropouts is unconfirmed. Changing the resynchronization timer did not help.
+- Ineffective experimental DSP timer, PCM width, and transport clock changes are excluded.
+- The APK is rebuilt from your stock copy. The publication build's generated artifacts have not received a new device listening test. Full-reboot behavior is also unverified.
 
-報告には、コミット、端末・ファームウェア、受信機、コーデック・レート、症状を添えてください。生ログを公開する場合は端末識別情報を取り除いてください。
+Reports should include the commit, phone/firmware, receiver, codec/sample rate, and symptoms. Remove device identifiers before publishing raw logs.

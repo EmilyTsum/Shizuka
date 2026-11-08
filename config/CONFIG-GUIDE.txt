@@ -1,14 +1,14 @@
-Shizuka / DZIF 試験版
+Shizuka / DZIF test
 
-設定ファイル：/data/adb/s25_bluetooth/config.conf
-config.example.conf の target_address に、ペアリング済みの接続先のアドレスを設定してください。
-設定は key=value 形式で読み込まれ、シェルとしては実行されません。
-安定性を優先し、Adaptive の既定値は 48kHz / 24bit / HQ です。
-44.1kHz の音切れは未解決です。実際のロスレス伝送は未確認です。
+External settings: /data/adb/s25_bluetooth/config.conf
+Set target_address in config.example.conf to your bonded device's address.
+Settings are parsed as key=value data, never executed as shell.
+Adaptive defaults to 48 kHz / 24-bit / HQ for stability.
+44.1 kHz dropouts remain unresolved. Actual lossless transmission is unverified.
 
-未確認のビルドは、モジュールの「アクション」から15分の試験として適用します。
-別のビルドの音声確認済み証明はコピーしないでください。
-手動で元に戻すコマンド：
+Module Action starts an unverified build as a 15-minute rollback trial.
+Do not copy another build's audio verification proofs.
+Manual restore:
   su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'
 
-profile.json のハッシュと一致する未改変の原本だけに対応しています。
+Only unmodified stock files matching the hashes in profile.json are supported.
