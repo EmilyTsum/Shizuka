@@ -126,12 +126,52 @@ def build_policy(tools, android):
     return dex / "classes.dex"
 
 
+def build_status(tools, android):
+    java_home = os.environ.get("JAVA_HOME")
+    if not java_home:
+        raise SystemExit("Set JAVA_HOME to a JDK (17 or newer).")
+    classes = BUILD / "status-classes"
+    dex = BUILD / "status-dex"
+    shutil.rmtree(classes, ignore_errors=True)
+    shutil.rmtree(dex, ignore_errors=True)
+    classes.mkdir(parents=True)
+    dex.mkdir(parents=True)
+    subprocess.run(
+        [
+            str(Path(java_home) / "bin/javac"),
+            "--release",
+            "8",
+            "-classpath",
+            str(android),
+            "-d",
+            str(classes),
+            str(ROOT / "tools/BtStatus.java"),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            str(tools / "d8"),
+            "--min-api",
+            "34",
+            "--lib",
+            str(android),
+            "--output",
+            str(dex),
+            *map(str, sorted(classes.glob("*.class"))),
+        ],
+        check=True,
+    )
+    return dex / "classes.dex"
+
+
 def main():
     check_inputs()
     tools, android = sdk_paths()
     BUILD.mkdir(parents=True, exist_ok=True)
     build_apk(tools)
     build_policy(tools, android)
+    build_status(tools, android)
 
 
 if __name__ == "__main__":

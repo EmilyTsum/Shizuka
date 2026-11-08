@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'">
+<title>Shizuka · Bluetooth status</title>
+<link rel="stylesheet" href="status.css">
+<script src="status.js" defer></script>
+</head>
+<body>
+<main>
+<header><div><p class="eyebrow">SHIZUKA</p><h1>Bluetooth status</h1></div><span id="state" class="badge">Ready</span></header>
+<p id="message" role="status">Open this page from the Shizuka module in KernelSU.</p>
+<section class="card hero" aria-labelledby="route-label"><p id="route-label" class="label">MEDIA ROUTE</p><h2 id="transport">—</h2><p id="device" class="muted">No snapshot yet</p></section>
+<section class="card" aria-labelledby="selection-label"><h2 id="selection-label">Android selection</h2><p id="codec" class="codec">—</p><dl><div><dt>Sample rate</dt><dd id="rate">—</dd></div><div><dt>Bit depth</dt><dd id="bits">—</dd></div><div><dt id="mode-label">Mode</dt><dd id="mode">—</dd></div></dl><p id="selection-note" class="note">The Android selection is separate from the DSP input format and actual radio transmission.</p></section>
+<section class="card" aria-labelledby="dsp-label"><h2 id="dsp-label">DSP observation</h2><p id="dsp-note" class="muted">Not observed. Diagnostics are not running.</p><dl id="dsp-values" hidden><div><dt>Encoder state</dt><dd id="encoder">—</dd></div><div><dt>Quality / QHS</dt><dd id="quality">—</dd></div><div><dt>Packet interval</dt><dd id="interval">—</dd></div><div><dt>Observed age</dt><dd id="age">—</dd></div></dl><p class="note">Lossless transmission: <strong>unverified</strong>. An encoder state alone is not a bit-perfect verification.</p></section>
+<div class="actions"><button id="refresh" type="button">Refresh</button><button id="copy" type="button" class="secondary" disabled>Copy status</button></div>
+<label class="autorefresh"><input id="auto" type="checkbox"> Refresh every 5 seconds while visible</label>
+<p id="updated" class="footer">Read-only. Refreshing does not change codecs or enable DSP logging.</p>
+</main>
+</body>
+</html>

@@ -7,4 +7,12 @@ ui_print 'Existing external config is preserved. See config.example.conf.'
 ui_print 'Action applies/repairs. It does not disable an active module.'
 ui_print 'Rollback: sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'
 ui_print 'Full reboot flow has not been verified.'
-set_perm_recursive "$MODPATH" 0 0 0755 0644
+# KernelSU manages WebUI ownership and SELinux labels itself.
+for item in "$MODPATH"/*; do
+ [ "${item##*/}" = webroot ] && continue
+ if [ -d "$item" ]; then
+  set_perm_recursive "$item" 0 0 0755 0644
+ else
+  set_perm "$item" 0 0 0644
+ fi
+done

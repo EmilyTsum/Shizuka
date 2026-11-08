@@ -48,6 +48,7 @@ def main():
     hashes = "".join(entries)
     (stage / "payloads.sha256").write_text(hashes)
     (stage / "proofs/offline-ready").write_text(sha(hashes.encode()) + "\n")
+    shutil.copy2(BUILD / "status-dex/classes.dex", stage / "status.dex")
     shutil.copy2(BUILD / "policy-dex/classes.dex", stage / "policy.dex")
     (stage / "policy.sha256").write_text(sha((stage / "policy.dex").read_bytes()) + "\n")
     for src, name in [
