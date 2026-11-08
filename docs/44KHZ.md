@@ -48,3 +48,15 @@ A temporary accounting-wrapper experiment was rejected by DSP signature verifica
 - A bounded 32-bit minHQ=256 trial changed the DSP's calculated adjustment to 210 ms; sound was normal but dropouts remained. It was reverted, including an exact original codec-plugin hash check. This was not a receiver-memory allocation test.
 - Reconfiguration retries and controller START/STOP ownership have been repaired separately. The latest HQ-default build passed a fresh Adaptive48/HQ listening check. These changes do not establish a 44.1 kHz dropout fix.
 - A review of 19 saved producer-ring captures found no normal R3 counter exposing accepted samples or represented decoded samples per output buffer. The packet log describes encoder dispatch, not a decoded-sample count. No active counter has yet been tied to the 27-second symptom; neither a clean packet sequence nor the absence of error strings proves correct downstream delivery.
+
+## Host-to-DSP queue observation
+
+A later fixed-tone test reproduced the reported click at Adaptive 44.1 kHz/HQ while observing the shipped GSL write-buffer bitmap and actual completion counter through read-only process memory. The tone's AudioTrack reported zero underruns. PAL source PCM was 48 kHz, stereo, in 32-bit containers, with four 7,680-byte / 20 ms periods. It was not the earlier music route's 192 kHz source configuration.
+
+| Encoder rate | Approximate observation | Valid snapshots | Four slots in use | Completion rate |
+| --- | --- | --- | --- | --- |
+| 44.1 kHz, first interval | 30.80 s | 600/600 | 599 | 49.98/s |
+| 44.1 kHz, second interval | 30.98 s | 599/600 | 599 | 50.01/s |
+| 48 kHz control | 20.66 s | 399/400 | 399 | 50.00/s |
+
+Snapshots were about 50 ms apart. Invalid/racing reads were excluded, not counted as empty buffers. Used slots mean reserved or DSP-unacknowledged host memory; they do not specify remaining playable samples or earbud latency. No sampled sustained host-to-DSP starvation was observed. Shorter excursions between samples remain possible, and an ACK does not prove correct downstream audio. This shifts the next observation point toward conversion, encoder output and downstream delivery. Codec rate alone must not be substituted for the actual RAT/input media format.
