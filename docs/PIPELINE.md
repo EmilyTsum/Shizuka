@@ -65,6 +65,14 @@ The active connection proxy also consumes `0x0A001065`, but this is a boolean al
 
 The wrapper requests disabling the framework's one-time prebuffer during its initial legacy initialization. Public AudioReach code maps this to inter-container buffering, with separate regular/prebuffer decisions. It is distinct from receiver playout buffering. Later switch to R3 and the stock framework's effective graph state require runtime validation. R3 at 44.1 kHz also requests COP zero padding off; HQ at 48 kHz can request it on. The closed packetizer's interpretation has not been established, so neither flag is patched speculatively.
 
+## Sender buffer capacity
+
+Read-only inspection of the active PAL Stream and Session objects at both 48 and 96 kHz/HQ found four 30,720-byte periods. Their source PCM was 192 kHz, stereo, in 32-bit containers: each period represents 20 ms, for 80 ms of configured capacity. This is not measured occupancy or earbud latency.
+
+An offline, exact-build candidate increases the count to eight for a fresh, unopened PCM on that observed route, keeping Stream and Session counts consistent. The shipped plugin supports eight periods, and the count reaches `pcm_config.period_count` before `pcm_open`. The candidate is not installed or included in this release. It changes capacity to 160 ms; it does not implement 160 ms of preroll. Existing allocations cannot resize in place, and an expanded PCM may retain its capacity across a codec change until it closes.
+
+The shipped PAL starts PCM before client writes. Although the plugin forwards software thresholds, its start function calls AGM immediately; the inspected AGM write path has no threshold-based automatic-start gate. Increasing capacity alone therefore cannot guarantee more queued audio. Generic progress APIs also need validation: the inspected AGM processed-buffer helper returns a constant, while its normal non-NOIRQ sync operation is unsupported. These values must not be presented as occupancy telemetry.
+
 ## Remaining unobserved boundary
 
 Completed encoder output is not final over-air delivery. Its proprietary eight-byte header is not established as an RTP header. The padded output container size, HAL bitrate and encoder target bitrate are not measured codec/radio throughput.

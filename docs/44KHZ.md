@@ -25,7 +25,7 @@ The periodic click remains unresolved. Keep 48 kHz/HQ as the listening-tested st
 
 ## Remaining boundary
 
-Measure sample consumption and packet presentation timestamps across the R3 wrapper, DSP transport and controller, alongside receiver/link-quality counters. The ordinary Android vendor-command API rejects the reserved BQR command, including at the Bluetooth service. No raw command was injected outside the stack's command queue. No speculative timing patch is included.
+Measure sample consumption and packet presentation timestamps across the R3 wrapper, DSP transport and controller, alongside receiver/link-quality counters. The ordinary Android vendor-command API rejects the reserved BQR command, including at the Bluetooth service. A private, temporary diagnostic APK allowed only UID 0 to submit one exact empty-set DELETE through the existing command queue. The controller rejected it with status `0x12` (invalid parameters); no fallback or mask changes were sent. The diagnostic APK was removed and the exact listening-tested payload restored. This does not establish whether length, zero mask, or another parameter combination caused rejection. No speculative timing patch is included.
 
 An existing timestamped producer-ring log can be summarized locally with `python tools/analyze_encoder_log.py LOG --markers MARKERS`. This parser does not enable diagnostics or collect device data. Raw captures are not distributed.
 
@@ -47,3 +47,4 @@ A temporary accounting-wrapper experiment was rejected by DSP signature verifica
 - Actual firmware RAT intermediate conversion truncates integer kHz, but the final absolute deadline uses full Hz. The previous 441-sample timer trial cannot be dismissed merely because an intermediate field becomes 10022 µs. No 44000 Hz physical clock has been established.
 - A bounded 32-bit minHQ=256 trial changed the DSP's calculated adjustment to 210 ms; sound was normal but dropouts remained. It was reverted, including an exact original codec-plugin hash check. This was not a receiver-memory allocation test.
 - Reconfiguration retries and controller START/STOP ownership have been repaired separately. The latest HQ-default build passed a fresh Adaptive48/HQ listening check. These changes do not establish a 44.1 kHz dropout fix.
+- A review of 19 saved producer-ring captures found no normal R3 counter exposing accepted samples or represented decoded samples per output buffer. The packet log describes encoder dispatch, not a decoded-sample count. No active counter has yet been tied to the 27-second symptom; neither a clean packet sequence nor the absence of error strings proves correct downstream delivery.
