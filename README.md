@@ -19,7 +19,7 @@ pip install -r requirements.txt
 python tools/build_all.py
 ```
 
-生成物は `dist/Shizuka-DZIF-0.6.0-test.zip`。KernelSUでインストールし、モジュールのActionから適用します。新しいビルドには音声確認済みの証明を付けず、15分で自動復元する試験として動作します。手動復元：
+生成物は `dist/Shizuka-DZIF-0.6.0-test.zip`。KernelSUでインストールし、モジュールの「アクション」から適用します。新しいビルドには音声確認済みの証明を付けず、15分で自動復元する試験として動作します。手動復元：
 
 ```sh
 su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'

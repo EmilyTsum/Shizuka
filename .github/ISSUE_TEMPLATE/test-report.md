@@ -1,11 +1,11 @@
 ---
-name: Test report
-about: Playback results from your device
+name: 動作報告
+about: お使いの端末での再生・切り替え結果
 ---
 
-- Commit:
-- Phone / firmware:
-- Receiver:
-- Codec / sample rate / bit depth:
-- Result (dropouts, noise, switching):
-- Reproduction steps:
+- コミット：
+- 端末・ファームウェア：
+- イヤホン・スピーカー：
+- コーデック・サンプリングレート・ビット深度：
+- 結果（音切れ・異音・切り替え）：
+- 再現手順：
