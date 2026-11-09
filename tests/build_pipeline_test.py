@@ -175,16 +175,18 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(list(self.build.iterdir()), [path])
 
     def test_build_all_stops_before_packaging_after_a_failed_stage(self):
-        with patch("subprocess.run") as run:
-            module = frontend("build_all")
-            run.assert_not_called()
-            run.side_effect = [None, subprocess.CalledProcessError(1, "verify_offline.py")]
-            with self.assertRaises(subprocess.CalledProcessError):
-                module.main()
-        self.assertEqual(
-            [pathlib.Path(call.args[0][1]).name for call in run.call_args_list],
-            ["build_android.py", "verify_offline.py"],
-        )
+        stages = ["build_android.py", "build_settings_app.py", "verify_offline.py", "package.py"]
+        for index, stage in enumerate(stages):
+            with self.subTest(failed_stage=stage), patch("subprocess.run") as run:
+                module = frontend("build_all")
+                run.assert_not_called()
+                run.side_effect = [None] * index + [subprocess.CalledProcessError(1, stage)]
+                with self.assertRaises(subprocess.CalledProcessError):
+                    module.main()
+                self.assertEqual(
+                    [pathlib.Path(call.args[0][1]).name for call in run.call_args_list],
+                    stages[:index + 1],
+                )
 
 
 if __name__ == "__main__":
