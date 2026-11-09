@@ -9,10 +9,12 @@ from pathlib import Path
 
 from shizuka.java import java_tools
 from shizuka.project import ANDROID, BUILD, ROOT
+from shizuka.tuning import verify_generated
 from shizuka.validation import POLICY_CASES
 
 
 def verify_policies(android_jar=None):
+    verify_generated()
     java, compiler = java_tools()
     classes = BUILD / "policy-host-tests"
     classes.mkdir(parents=True, exist_ok=True)
@@ -28,6 +30,8 @@ def verify_policies(android_jar=None):
             "ExtensionConfigStore",
             "ProfileSession",
             "ControlJson",
+            "TuningCatalog",
+            "TuningDefinitions",
             "CodecTuning",
             "DspLogDecoder",
             "DiagnosticStore",

@@ -52,7 +52,7 @@ public final class BtConfig {
             requireCount(args, 5);
             ExtensionConfig.defaults().with(args[3], args[4]); // Validate before creating lock/state.
             store.update(config -> config.with(args[3], args[4]));
-            if (CodecTuning.KEY.equals(args[3]) || CodecTuning.LL_KEY.equals(args[3])) {
+            if (CodecTuning.isControl(args[3])) {
                 System.out.println(ControlJson.encode(CodecTuning.describe(store.read()))); return;
             }
             System.out.println("extension saved; apply native changes with rollback followed by KernelSU Action");

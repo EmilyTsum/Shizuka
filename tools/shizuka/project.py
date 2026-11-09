@@ -35,7 +35,14 @@ def source_fingerprint(paths):
 
 
 def android_sources_fingerprint():
-    return source_fingerprint([*ANDROID.glob("*.java"), ROOT / "tools/build_android.py"])
+    return source_fingerprint(
+        [
+            *ANDROID.glob("*.java"),
+            ROOT / "tools/build_android.py",
+            ROOT / "config/tuning.json",
+            ROOT / "tools/shizuka/tuning.py",
+        ]
+    )
 
 
 def native_sources_fingerprint(driver):
@@ -78,6 +85,7 @@ def offline_sources_fingerprint():
             and not set(path.relative_to(ROOT / "module").parts) & {"state", "payload", "proofs"}
         ),
         ROOT / "config/config.example.conf",
+        ROOT / "config/tuning.json",
     ]
     return source_fingerprint(sources)
 

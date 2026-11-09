@@ -1,4 +1,4 @@
-# HQ / Lossless TTP experiment
+# Adaptive HQ / Lossless / Adaptive LL TTP experiment
 
 The [shared control API](CONTROLS.md) can now generate a versioned plan for this
 builder. [Opt-in diagnostics](DIAGNOSTICS.md) provides a path for collecting the
@@ -37,22 +37,29 @@ deprecated/ignored on this build; increasing maxHQ alone is ineffective.
 
 ## Trial behavior
 
-Rather than change bitrate/frame-size tables or mislabel a host property, this
-experiment adds a bounded increment to the actual calculated HQ adjustment.
+The experiment adds independent bounded increments to calculated Adaptive HQ
+and Adaptive LL adjustments. Bitrate/frame-size tables and encoder modes remain
+unchanged. Controls accept integer 0..100 ms (step 1); 50/100 remain useful
+comparison stages. Domains and supported contexts are declared in
+`config/tuning.json`, not embedded in the common planner.
 
 | Selection | Effect |
 | --- | --- |
 | `--delta-ms 0` | Byte-identical stock control image |
 | `--delta-ms 50` | Add 50,000 us in HQ states 3 / 7 |
 | `--delta-ms 100` | Add 100,000 us in HQ states 3 / 7 |
-| LL / other states | Preserve the stock result |
+| `--ll-delta-ms 23` | Add 23,000 us in Adaptive LL states 2 / 6; HQ remains stock unless requested |
+| Both increments zero | Byte-identical stock image |
+| Other states | Preserve the stock result |
 
 The hook runs in shared `calcTTPAdj` after the stock clamps and the
 lossless-capable floor, before the existing diagnostic log and 8-us packing.
 This intentionally shifts the scheduling adjustment beyond the stock policy
 range for the trial; it does **not** raise an internal target word or establish
 a larger receiver buffer. Adaptive HQ (including 96 kHz) and Lossless HQ share
-this path; actual state 3/7 must be confirmed for each tested stream.
+this path; actual state 3/7 must be confirmed for each tested stream. Adaptive
+LL uses the independent state 2/6 path. Adding LL scheduling margin increases
+latency without selecting HQ. Separate aptX LL and LC3 are different encoders.
 
 The guard includes the subsequent state term (`ctx+0x6494 * 1000 us`) when
 checking the unsigned 16-bit wire limit of 524,280 us. If the addition cannot fit,
@@ -63,7 +70,10 @@ codecs and the separate LE Audio encoder are not patched.
 The two original debug branches remain intact. Their diagnostic becomes
 `Shizuka TTP HQ requested +50ms; calculated us ...` (or `+100ms`). The number is
 the post-guard adjustment before the final state term; “requested” is deliberate:
-an LL invocation or ceiling rejection does not receive the increment.
+a state outside the requested mode or ceiling rejection does not receive the
+increment. With an LL request the label becomes
+`Shizuka TTP HQ+50 LL+23 requested; calculated us ...`; the decoder exports the
+HQ and LL requests separately.
 
 ## Build and verify
 
@@ -82,15 +92,17 @@ python tools/verify_ttp_trial.py --input /path/to/aptx_adaptive_enc_module.so.1 
 qemu-hexagon /new/path/ttp-50/harness.elf
 ```
 
-Repeat with a different output directory for 100. A 0 build requires no LLVM
-tools and produces the stock control; the instruction harness is for 50/100.
+Use another output directory for every request. Direct canonical
+`--set adaptive_hq_ttp_delta_ms=37 --set adaptive_ll_ttp_delta_ms=23` and a shared
+API `--plan` are also supported. Both zero requires no LLVM tools and produces
+the stock control. Nonzero candidates have an instruction harness.
 The builder refuses unknown hashes, occupied padding, changed hook packets,
 unexpected symbols/ELF layout and existing output directories. Its manifest
 records all modified ranges, input/output hashes and explicit unverified state.
 The verifier reproduces the patch and rejects altered candidates/manifests.
 
 The harness executes the **actual hook and bias bytes extracted from the
-candidate**, at their linked addresses. For each increment, 1,920 vectors check
+candidate**, at their linked addresses. Mode-specific ceiling vectors check
 known/unknown states, both original debug branches, ordinary values, signed/large
 inputs, exact ceiling boundaries and final state terms. It also checks the
 preserved registers and return. The Linux exit stub follows the
@@ -123,3 +135,21 @@ buffering responds. The phone-side arithmetic or an already stable radio link
 cannot establish this. QHS is kept as its existing, separately verified opt-in;
 this experiment does not force encoder bitrate/quality or prove a downstream
 QHS effect. Cold reboot → DFRoot → KernelSU remains a separate open check.
+
+## 0.9.1 offline validation
+
+On 2026-11-09, 210 candidates were built on the Mac: every integer 0..100
+individually for HQ and Adaptive LL, the 0/50/100 matrix, and additional mixed
+values. Their actual instruction bytes passed 473,088 vectors in a Linux QEMU
+VM running locally on the same Mac. Checks cover state separation, both debug
+branches, signed/large inputs, exact ceilings, final state terms and preserved
+registers. All eight prior non-stock 0/50/100 image hashes reproduce exactly.
+This is firmware instruction/ABI evidence; loader acceptance and audible results
+remain separate device tests. The standard module still ships no DSP trial.
+
+Common dispatch and schema compatibility are in `tools/shizuka/ttp.py`.
+Addresses, image gates and instruction generation are isolated in
+`tools/shizuka/dsp_backends/samsung_dzif_ttp.py`; the independent instruction
+oracle is in `samsung_dzif_verify.py`. Another firmware must register its own
+verified implementation. The shared planner and persistence need no new device
+branch to expose another provider or integer control.

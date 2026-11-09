@@ -90,9 +90,15 @@ process/rate correlation is not a radio/receiver acknowledgement.
 
 The first backend covers exact Samsung DZIF Adaptive legacy/R3. Separate aptX
 LL and LC3 encoders need their own verified capture/decoder providers. Adaptive's
-own LL mode/state can be observed without claiming an LL delay control.
+own LL mode/state can be observed, with separate HQ/LL trial requests. Additional
+Adaptive LL TTP tuning is available through the control API; separate aptX LL
+tuning remains unsupported.
 
-The wrapper accepts known stock/+50/+100 DSP hashes and the built reader hash.
+The runtime profile accepts the known stock and eight HQ/LL 0/50/100 image
+hashes, plus the built reader hash. The integer builder supports additional
+values; capture of other candidate images requires the backend's approved-image
+list to be extended after verifying those candidates. This gate never falls back
+to a different device's acquisition ABI.
 Existing FARF overrides are refused. The collector publishes one complete owned
 hard link using mask 4 and a fixed encoder/feedback filename list. It changes no
 quality override, codec, DSP binary, property or audio route and restarts no

@@ -12,7 +12,7 @@ The KernelSU WebUI shows the current media route and Android codec selection. Lo
 
 Opt-in [DSP diagnostics](docs/DIAGNOSTICS.md) exports raw/structured encoder observations. The shared [control API](docs/CONTROLS.md) exposes capabilities, saved tuning intent and codec/mode plans. The screen is provisional and independent of a future One UI design. This acquisition path has not been tested on a phone.
 
-An optional, offline [HQ/Lossless TTP experiment](docs/TTP-TRIAL.md) can build stock, +50 ms and +100 ms DSP candidates for the exact S25 image. It is excluded from normal module payloads and has no automatic device activation; receiver/audio validation is pending.
+The optional, offline [Adaptive HQ/Lossless and Adaptive LL TTP experiment](docs/TTP-TRIAL.md) has independent integer increments (0..100 ms, step 1). Typed controls and device/provider contexts share one definition catalog; exact-image DSP implementations are separate backends. The included implementation targets the verified DZIF image. It is excluded from normal module payloads and has no automatic device activation; receiver/audio validation is pending.
 
 ## Build
 
