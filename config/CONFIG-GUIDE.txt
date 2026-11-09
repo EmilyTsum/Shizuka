@@ -14,8 +14,18 @@ classic_qhs_host_aware=false: no controller overlay/request or resident policy.
 aptx_voice_enabled=system: leave Android's property unchanged.
 adaptive_priority=system: leave Android's priority property unchanged.
 aptx_hd_priority=system: leave Android's priority property unchanged.
-Explicit technical overrides are applied on module activation. Property recovery
+Explicit voice/priority property overrides are applied on module activation. Property recovery
 restores only this activation's changes and preserves later user/system changes.
+
+aptx_hq_ttp_delta_ms=0: saved HQ tuning intent (0, 50, 100 ms), shared by Adaptive
+HQ and Lossless HQ. config.sh tuning capabilities|get|set|plan provides JSON.
+Saving this value or running KernelSU Action does not apply it; it feeds an
+offline exact-image DSP candidate build and fresh-graph trial. LL and independent
+per-codec delay controls are not implemented. See docs/CONTROLS.md in the repo.
+
+Opt-in diagnostics.sh capture SECONDS (5..120) exports stock DSP observations.
+diagnostics.sh list / export SESSION / recover manages private session files.
+Capture is not started by status refresh or at boot. Its device path is untested.
 
 QHS requires the verified Samsung DZIF backend, a trusted root-owned regular
 configuration file, Bluetooth ON, exact controller firmware and a module

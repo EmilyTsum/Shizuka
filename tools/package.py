@@ -27,6 +27,13 @@ def main():
     manifest = read_manifest(profile, BUILD)
     verify_native_validation(profile, BUILD)
     stage = BUILD / "package"
+    diagnostic = json.loads((BUILD / "diagnostics-build.json").read_text())
+    if diagnostic != {
+        "source_sha256": sha((ROOT / "src/diagnostics/dsp_capture.c").read_bytes()),
+        "builder_sha256": sha((ROOT / "tools/build_diagnostics.py").read_bytes()),
+        "output_sha256": sha((BUILD / "dsp-capture").read_bytes()),
+    }:
+        raise ValueError("Diagnostic reader build is stale; rebuild Android artifacts")
     shutil.rmtree(stage, ignore_errors=True)
     shutil.copytree(
         ROOT / "module",
@@ -42,6 +49,9 @@ def main():
             "disable",
             "remove",
             ".enable-*",
+            "telemetry.json",
+            "diagnostics",
+            "*.jsonl",
         ),
     )
     (stage / "device-profile").write_text(profile.runtime_id + "\n")
@@ -62,6 +72,8 @@ def main():
     shutil.copy2(BUILD / "status-dex/classes.dex", stage / "status.dex")
     shutil.copy2(BUILD / "policy-dex/classes.dex", stage / "policy.dex")
     (stage / "policy.sha256").write_text(sha((stage / "policy.dex").read_bytes()) + "\n")
+    shutil.copy2(BUILD / "dsp-capture", stage / "dsp-capture")
+    (stage / "dsp-capture.sha256").write_text(diagnostic["output_sha256"] + "\n")
     for src, name in [
         (ROOT / "config/config.example.conf", "config.example.conf"),
         (ROOT / "config/CONFIG-GUIDE.txt", "CONFIG-GUIDE.txt"),

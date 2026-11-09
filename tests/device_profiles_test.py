@@ -395,6 +395,20 @@ class Profiles(unittest.TestCase):
         for directory in ["module", "config"]:
             shutil.copytree(ROOT / directory, repository / directory)
         shutil.copy2(ROOT / "LICENSE", repository / "LICENSE")
+        for relative in ["src/diagnostics/dsp_capture.c", "tools/build_diagnostics.py"]:
+            target = repository / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+        (self.d / "dsp-capture").write_bytes(b"synthetic reader fixture")
+        (self.d / "diagnostics-build.json").write_text(
+            json.dumps(
+                {
+                    "source_sha256": digest(repository / "src/diagnostics/dsp_capture.c"),
+                    "builder_sha256": digest(repository / "tools/build_diagnostics.py"),
+                    "output_sha256": digest(self.d / "dsp-capture"),
+                }
+            )
+        )
         for name in [
             "state/active",
             "proofs/verified-payloads.sha256",

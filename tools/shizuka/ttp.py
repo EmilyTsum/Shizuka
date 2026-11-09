@@ -21,6 +21,37 @@ LOG_OFFSET = 0x21CDD
 LOG = b"CAPI V2 APTX ADAPTIVE ENC Calculated ttpadj: ttpadj microseconds %lld\0"
 MAX_WIRE_US = 65535 * 8
 
+
+def validate_control_plan(plan):
+    """Validate the versioned public plan boundary before invoking build tools."""
+    if not isinstance(plan, dict):
+        raise ValueError("Invalid codec-control plan")
+    context = plan.get("context", {})
+    increment = plan.get("requested_ms")
+    if (
+        type(plan.get("schema")) is not int
+        or plan.get("schema") != 1
+        or plan.get("provider") != "samsung-dzif-calculated-hq-ttp"
+        or plan.get("applied") is not False
+        or plan.get("activation") != "offline_dsp_build_then_fresh_graph"
+        or plan.get("coupled_contexts") != ["adaptive/hq", "lossless/hq"]
+        or type(increment) is not int
+        or increment not in (0, 50, 100)
+        or plan.get("state") != ("stock" if increment == 0 else "planned_not_applied")
+        or not isinstance(context, dict)
+        or context.get("profile") != "samsung-sm-s931z-dzif"
+        or context.get("codec") not in ("adaptive", "lossless")
+        or context.get("mode") != "hq"
+        or type(context.get("sample_rate_hz")) is not int
+        or type(context.get("selection_bits")) is not int
+        or context.get("sample_rate_hz") not in (44100, 48000, 96000)
+        or context.get("selection_bits") != (16 if context.get("codec") == "lossless" else 24)
+        or (context.get("codec") == "lossless" and context.get("sample_rate_hz") != 44100)
+    ):
+        raise ValueError("Unsupported or inconsistent codec-control plan")
+    return increment
+
+
 # Only caller-saved r2-r7 and predicates are scratch. r16/r18/r19/r31 and the
 # existing frame remain intact. The original debug dispatch packet is replayed,
 # including its .new dependency, before either original log path continues.
@@ -203,9 +234,11 @@ def patch_verified(data, delta_ms, pieces):
     return bytes(result), manifest
 
 
-def write_candidate(stock, destination, delta_ms, llvm_mc, linker):
+def write_candidate(stock, destination, delta_ms, llvm_mc, linker, control_plan=None):
     data = Path(stock).read_bytes()
     baseline = inspect_stock(data)
+    if control_plan is not None and validate_control_plan(control_plan) != delta_ms:
+        raise ValueError("TTP increment differs from the control plan")
     if type(delta_ms) is not int or delta_ms not in (0, 50, 100):
         raise ValueError("Only stock (0), +50 ms and +100 ms trials are supported")
     if delta_ms:
@@ -228,6 +261,8 @@ def write_candidate(stock, destination, delta_ms, llvm_mc, linker):
             "audio_verified": False,
             "receiver_delay_verified": False,
         }
+    if control_plan is not None:
+        manifest["control_plan"] = control_plan
     destination = Path(destination)
     # Refuse existing paths: never replace a currently mounted experiment.
     destination.mkdir(parents=True, exist_ok=False)

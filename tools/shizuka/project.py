@@ -64,12 +64,12 @@ def native_source(driver, name):
 
 def offline_sources_fingerprint():
     sources = [
-        *(path for path in (ROOT / "src").rglob("*") if path.suffix in {".cpp", ".h", ".ld"}),
+        *(path for path in (ROOT / "src").rglob("*") if path.suffix in {".c", ".cpp", ".h", ".ld"}),
         *(path for path in (ROOT / "tools").rglob("*") if path.suffix in {".py", ".java"}),
         *(
             path
             for path in (ROOT / "tests").rglob("*")
-            if path.suffix in {".py", ".java", ".cpp", ".cjs"}
+            if path.suffix in {".py", ".java", ".c", ".cpp", ".cjs"}
         ),
         *(
             path

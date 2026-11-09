@@ -10,6 +10,8 @@ Use Android Bluetooth Settings and Developer Options for codec/device preference
 
 The KernelSU WebUI shows the current media route and Android codec selection. Lossless selection does not confirm actual lossless transmission. Historical measurements and known issues are in [STATUS.md](docs/STATUS.md) and [QHS.md](docs/QHS.md).
 
+Opt-in [DSP diagnostics](docs/DIAGNOSTICS.md) exports raw/structured encoder observations. The shared [control API](docs/CONTROLS.md) exposes capabilities, saved tuning intent and codec/mode plans. The screen is provisional and independent of a future One UI design. This acquisition path has not been tested on a phone.
+
 An optional, offline [HQ/Lossless TTP experiment](docs/TTP-TRIAL.md) can build stock, +50 ms and +100 ms DSP candidates for the exact S25 image. It is excluded from normal module payloads and has no automatic device activation; receiver/audio validation is pending.
 
 ## Build
@@ -27,7 +29,7 @@ pip install -r requirements.txt
 python tools/build_all.py
 ```
 
-Output: `dist/Shizuka-samsung-sm-s931z-dzif-0.8.2-test.zip`. Install through KernelSU, then use Action. New archives have no inherited audio proof and start as a 15-minute trial with automatic rollback. Manual restoration:
+Output: `dist/Shizuka-samsung-sm-s931z-dzif-0.9.0-test.zip`. Install through KernelSU, then use Action. New archives have no inherited audio proof and start as a 15-minute trial with automatic rollback. Manual restoration:
 
 ```sh
 su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'
