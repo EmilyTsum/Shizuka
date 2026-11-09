@@ -5,6 +5,9 @@ The included native patch is verified against the SM-S931Z DZIF stock inputs. Mo
 | Layer | Location | Responsibility |
 | --- | --- | --- |
 | Android helpers | `tools/android/` | System preferences, extension configuration, shared profile discovery/cleanup, read-only status and optional controller policy. |
+| Tuning definitions | `config/tuning.json` | Integer domains, aliases and device/provider/context capabilities; generated Java definitions are checked for drift. |
+| Portable tuning planner | `TuningCatalog`, `CodecTuning`, `tools/shizuka/tuning.py` | Internal and external API contracts, canonical parameters and context operations; no firmware offsets. |
+| DSP implementations | `tools/shizuka/dsp_backends/` | Exact-image TTP patching, state mappings, instruction oracle and ABI verification. |
 | Shared codec interfaces/logic | `src/` | Codec negotiation and bridge interfaces. Existing private ABI tags remain stable. |
 | Native device implementation | `src/backends/samsung_dzif/` | Firmware-specific memory layout, JNI integration, callbacks and linker layout. |
 | Native patch builder | `tools/shizuka/backends/` | Hook offsets, trampolines, binary patching, host case matrix and dispatch verification. |
@@ -35,3 +38,25 @@ Native/APK artifacts and test evidence carry the profile identity/fingerprint. P
 `verify_offline.py --host-only` runs the shared and backend host suites. It produces host evidence, which is insufficient by itself to package a native module. Full `verify_offline.py` also rebuilds the native artifacts and runs the backend's binary dispatch checks. Only after those checks succeed is `build/native-validation.json` published, binding the current source/profile to the exact Android/native build records. Packaging requires both kinds of evidence.
 
 Starting a native/APK rebuild invalidates its previous build record and integration result before checking inputs. Full verification also removes previous integration evidence before running tests; failed stages never leave that old result usable. Build records and completed evidence are published by atomic rename. Changed outputs, manifests, metadata, profiles or sources invalidate their dependent result. A source change during a verification run also fails the run. None of these host or binary checks establishes phone, reboot or audible correctness.
+
+## DSP tuning and diagnostics
+
+DSP tuning has a separate explicit backend registry from Bluetooth/JNI patching.
+A profile can expose no tuning providers, reuse a proven backend, or supply a
+new one. The generic planner accepts future codec/mode identifiers and uses
+provider matching to decide support; it never treats an unknown profile as a
+Samsung device. Multiple controls per context and different integer domains /
+units are supported. See [CONTROLS.md](CONTROLS.md) for the extension steps.
+
+The currently included DSP implementation pins one Hexagon stock image. Its
+addresses and firmware assumptions live in `samsung_dzif_ttp.py`; the actual-byte
+execution oracle lives in `samsung_dzif_verify.py`. The common builder/verifier
+dispatch through registered code and exact image hashes. Diagnostics similarly
+asks the bundled runtime profile for `profile_diagnostics_preflight`; firmware
+and approved-image checks are outside the common command wrapper. The present
+native collector uses Qualcomm FastRPC, not a universal DSP memory interface.
+Other acquisition ABIs need their own collector and decoder provider.
+
+Host Linux-only suites can run in a local Linux VM on macOS. On 2026-11-09 the
+new TTP candidates and their Hexagon harnesses were built on the Mac and executed
+in a QEMU HVF VM on that same Mac. mn-core-01 is no longer used for this work.

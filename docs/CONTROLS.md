@@ -1,37 +1,51 @@
 # Codec control API
 
-The KernelSU screen is provisional. Its future One UI design can call the same
-APIs; it does not own a second preference store or Lossless classifier.
+The KernelSU screen is provisional. A future One UI screen can use the same
+capabilities, settings and observations. There is no network listener.
 
-`CodecTuning` is the shared internal Java model. `BtConfig` exposes it on Android
-and `CodecControlTool` exposes it on a host JDK. Responses are versioned JSON.
-There is no network listener.
+## Shared definitions and ownership
 
-## Ownership and application
+`config/tuning.json` is the source of truth for canonical names, compatibility
+aliases, integer type, unit, default, minimum, maximum and step. It also declares
+which providers support each device/firmware, codec, mode, sample rate and bit
+depth. `TuningCatalog` is device-independent; `CodecTuning` plans matching
+operations. Multiple controls can match one context. Neither class contains a
+Samsung profile check, DSP address or aptX-specific mode rule.
+
+`tools/generate_tuning.py` emits `TuningDefinitions.java` from that catalog.
+Android builds, host planning and tests reject stale generated definitions.
+Catalog changes also invalidate source-bound build and test evidence. Android
+`BtConfig` and host `CodecControlTool` use the same Java planner. The Python DSP
+builder independently checks the public JSON contract against the same catalog.
 
 Android owns codec selection, sample rate, selection bit depth, transport and
-profile permissions. Existing `config.sh device ...` operations use Android's
-store. No connect-time codec replay is introduced.
+profile permissions. `config.sh device ...` uses Android's store. Tuning does not
+replay codec preferences when a device connects.
 
-Shizuka owns additional controls with a verified implementation. Saving tuning
-returns `applied:false`. A plan states its provider, context, activation method
-and scope. DSP observations remain separate evidence; a successful save is not
-an applied acknowledgement.
+## Current providers
 
-| Control | Values | Current scope |
+| Canonical key | Integer domain | Current implementation |
 | --- | --- | --- |
-| `aptx_hq_ttp_delta_ms` | 0, 50, 100 ms | Exact DZIF Adaptive HQ and Lossless HQ together |
-| `adaptive.hq.ttp_delta_ms` | Alias of the same key | Not an independent Adaptive setting |
-| `lossless.hq.ttp_delta_ms` | Alias of the same key | Not an independent Lossless setting |
+| `adaptive_hq_ttp_delta_ms` | 0..100 ms, step 1, default 0 | DZIF Adaptive HQ and Lossless HQ together; DSP states 3/7 |
+| `adaptive_ll_ttp_delta_ms` | 0..100 ms, step 1, default 0 | DZIF Adaptive LL; DSP states 2/6, independent of HQ |
 
-The current DSP hook sees shared HQ states 3/7. It cannot independently filter
-Android's Adaptive/Lossless item or sample rate, so capabilities expose that
-coupling. LL delay, separate aptX LL, LC3 buffer controls and receiver buffer
-depth are unsupported. Their plans return `state:unsupported`; a nonzero HQ
-intent does not leak into those plans.
+`aptx_hq_ttp_delta_ms`, `adaptive.hq.ttp_delta_ms` and
+`lossless.hq.ttp_delta_ms` remain compatibility inputs for the HQ key.
+`adaptive.ll.ttp_delta_ms` aliases the LL key. New responses and saved files use
+canonical `adaptive_` names. Supplying the same control twice, including through
+an alias, is rejected even if both values agree. Reading an old file is passive;
+a subsequent save/migration writes the canonical spelling. QHS trust rules are
+preserved, including during alias migration and concurrent saves.
 
-Activation is `offline_dsp_build_then_fresh_graph`, not hot apply. Standard
-KernelSU Action does not apply this saved TTP value. See [TTP-TRIAL.md](TTP-TRIAL.md).
+Adaptive LL playback was already supported. This version adds its **additional
+TTP adjustment** API. Separate aptX LL playback is also distinct from Adaptive
+LL; its additional TTP adjustment has no provider here. Neither do LC3 receiver
+buffers or independent Adaptive/Lossless HQ increments. Unknown profiles and
+unsupported contexts return `state:unsupported`, with no fallback to S25 offsets.
+
+A positive LL adjustment adds scheduling margin and latency while retaining the
+LL encoder mode. It does not prove better audio quality, larger receiver buffers
+or a negotiated Lossless state. HQ/Lossless remain coupled by the actual DSP ABI.
 
 ## Android API
 
@@ -40,47 +54,59 @@ Run in a root shell:
 ```sh
 sh /data/adb/modules/s25_aptx_adaptive/config.sh tuning capabilities
 sh /data/adb/modules/s25_aptx_adaptive/config.sh tuning get
-sh /data/adb/modules/s25_aptx_adaptive/config.sh tuning set adaptive.hq.ttp_delta_ms 50
-sh /data/adb/modules/s25_aptx_adaptive/config.sh tuning plan samsung-sm-s931z-dzif adaptive hq 96000 24
+sh /data/adb/modules/s25_aptx_adaptive/config.sh tuning set adaptive_hq_ttp_delta_ms 100
+sh /data/adb/modules/s25_aptx_adaptive/config.sh tuning set adaptive_ll_ttp_delta_ms 23
+sh /data/adb/modules/s25_aptx_adaptive/config.sh tuning plan samsung-sm-s931z-dzif adaptive ll 48000 24
 sh /data/adb/modules/s25_aptx_adaptive/config.sh tuning plan samsung-sm-s931z-dzif lossless hq 44100 16
 ```
 
-The context explicitly identifies codec/mode/rate/selection-depth. Lossless
-requires HQ / 44100 / 16; its DSP input remains 24 bit. Adaptive HQ needs a
-concrete supported rate and 24-bit context.
+Responses use schema 2. A context plan contains canonical whole-profile
+`parameters`, matching `operations` (provider/backend/key/value/unit/activation/
+coupled contexts), and context-scoped state. One image can contain both HQ and
+LL requests even when the selected context's request is zero. `applied:false`
+always distinguishes saved intent/planning from runtime evidence.
 
-The existing private `ExtensionConfigStore` serializes internal and CLI writers
-with a stable lock and atomic replacement. The new key defaults to zero.
-Existing QHS trust/migration rules are retained. `accepted_change` identifies
-the write; `requested` is the current snapshot, which another writer can change.
-Neither is playback evidence.
+The current activation method is `offline_dsp_build_then_fresh_graph`.
+Saving tuning or running standard KernelSU Action does not install a DSP
+candidate or hot-apply a value. `ExtensionConfigStore` retains private paths,
+stable locking and atomic replacement. `accepted_change` identifies a write;
+`requested` is the current snapshot, which concurrent writers can change.
 
 ## Host planning and candidate builds
 
 ```sh
 python tools/codec_control.py capabilities
 python tools/codec_control.py plan --config config/config.example.conf \
-  --codec adaptive --mode hq --rate 96000 --bits 24 > plan.json
+  --profile samsung-sm-s931z-dzif --codec adaptive --mode ll --rate 48000 --bits 24 > plan.json
 python tools/ttp_trial.py build --plan plan.json \
   --input /path/to/aptx_adaptive_enc_module.so.1 --output /new/path/candidate \
   --llvm-mc /path/to/llvm-mc --linker /path/to/ld.lld
 ```
 
-The host uses the same Java model as Android. The builder validates schema,
-provider, types, context, coupling and activation before compiling, and stores
-the plan in the candidate manifest. The instruction verifier checks it again.
-`--plan` and `--delta-ms` are mutually exclusive; existing `--delta-ms 0|50|100`
-remains available. A candidate build never installs anything.
+The builder checks schema, types, limits, context, provider, coupling and
+activation. It records the plan in the manifest; the instruction verifier checks
+it again. Old schema-1 plans remain readable through a boundary adapter. New
+output is schema 2. `--plan` cannot be mixed with direct parameters. Direct
+`--set adaptive_hq_ttp_delta_ms=37 --set adaptive_ll_ttp_delta_ms=23` uses the same
+canonical definitions. `--delta-ms`/`--hq-delta-ms` and `--ll-delta-ms` remain
+compatibility flags. Candidate generation never writes to a device.
 
-## Extension points
+## Adding a device or control
 
-Add verified controls/providers in `CodecTuning`, with typed values, supported
-contexts and an explicit activation boundary. Independent HQ/Lossless or
-per-rate tuning needs a backend that can actually discriminate those contexts.
-Keep persistence in the shared store and Android-owned preferences in
-`DevicePreferences`.
+1. Declare a typed control/domain and profile/provider contexts in
+   `config/tuning.json`; regenerate definitions. Existing controls can be reused.
+2. Add/reuse a reviewed DSP backend under `tools/shizuka/dsp_backends/` and
+   register it in the dispatcher. Stock hashes, offsets, symbols, instruction
+   generation, mode-state mapping and the independent execution oracle belong
+   there. JSON cannot import code or run a command.
+3. Verify the actual candidate bytes and firmware conditions. Merely adding a
+   profile name/hash does not establish binary compatibility. Supply a runtime
+   profile's optional `profile_diagnostics_preflight` for its acquisition ABI.
+4. Keep persistence in the shared store and Android preferences in
+   `DevicePreferences`. Add observed fields once in `DspLogDecoder`, with source,
+   unit and freshness. Capture, replay, export and UI then share interpretation.
 
-Add observed fields with units/source/freshness once in `DspLogDecoder`.
-Capture, replay, JSON export and the provisional display then share their
-interpretation. Unrecognized messages remain in raw logs. Future UI controls
-render capabilities and unsupported state instead of inventing implied support.
+The regression suite uses another device, codec, rate, bit depth, signed domain
+and unit, with two controls in one context, to verify these extension boundaries.
+See [PORTING.md](PORTING.md), [TTP-TRIAL.md](TTP-TRIAL.md) and
+[DIAGNOSTICS.md](DIAGNOSTICS.md).

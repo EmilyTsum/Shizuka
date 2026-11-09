@@ -13,12 +13,15 @@ from pathlib import Path
 
 from shizuka.java import java_tools
 from shizuka.project import ANDROID
+from shizuka.tuning import verify_generated
 
 CORE = (
     "ClassicQhsPolicy",
     "ExtensionConfig",
     "CodecPresentation",
     "ControlJson",
+    "TuningCatalog",
+    "TuningDefinitions",
     "CodecTuning",
     "DspLogDecoder",
     "DspReplay",
@@ -54,7 +57,7 @@ def main():
     sub.add_parser("capabilities")
     plan = sub.add_parser("plan")
     plan.add_argument("--config", type=Path, required=True)
-    plan.add_argument("--profile", default="samsung-sm-s931z-dzif")
+    plan.add_argument("--profile", required=True, help="runtime profile from capabilities")
     plan.add_argument("--codec", required=True)
     plan.add_argument("--mode", required=True)
     plan.add_argument("--rate", type=int, required=True)
@@ -63,6 +66,7 @@ def main():
     replay.add_argument("input", type=Path)
     replay.add_argument("--format", choices=("native", "ring"), default="native")
     args = parser.parse_args()
+    verify_generated()
     java, compiler = java_tools()
     with tempfile.TemporaryDirectory(prefix="shizuka-controls-") as directory:
         subprocess.run(

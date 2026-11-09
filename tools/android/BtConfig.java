@@ -36,7 +36,7 @@ public final class BtConfig {
             case "get": requireCount(args, 4); System.out.println(ControlJson.encode(CodecTuning.describe(store.read()))); return;
             case "set":
                 requireCount(args, 6);
-                String key = CodecTuning.key(args[4]), value = CodecTuning.value(args[5]);
+                String key = CodecTuning.key(args[4]), value = CodecTuning.value(key, args[5]);
                 store.update(config -> config.with(key, value));
                 java.util.Map<String, Object> saved = CodecTuning.describe(store.read());
                 saved.put("accepted_change", ControlJson.object("key", key, "value", Integer.parseInt(value)));
@@ -52,7 +52,7 @@ public final class BtConfig {
             requireCount(args, 5);
             ExtensionConfig.defaults().with(args[3], args[4]); // Validate before creating lock/state.
             store.update(config -> config.with(args[3], args[4]));
-            if (CodecTuning.KEY.equals(args[3])) {
+            if (CodecTuning.isControl(args[3])) {
                 System.out.println(ControlJson.encode(CodecTuning.describe(store.read()))); return;
             }
             System.out.println("extension saved; apply native changes with rollback followed by KernelSU Action");

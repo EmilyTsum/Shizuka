@@ -112,7 +112,14 @@ final class DspLogDecoder {
         integer(text, "hQLatTarget0.*?=\\s*(-?\\d+)", "hq_target_word", "4000 us units on DZIF", "calcTTPAdj target log; not receiver delay", time);
         integer(text, "ttpadj microseconds (-?\\d+)", "calculated_ttp_us", "us", "calcTTPAdj before final state term/packing", time);
         integer(text, "Shizuka TTP HQ requested \\+(\\d+)ms", "ttp_trial_requested_ms", "ms", "DSP trial image request; ceiling guard may decline increment", time);
+        integer(text, "Shizuka TTP HQ requested \\+(\\d+)ms", "ttp_hq_trial_requested_ms", "ms", "DSP HQ trial request; not applied increment proof", time);
         integer(text, "Shizuka TTP HQ requested.*?calculated us (-?\\d+)", "calculated_ttp_us", "us", "post-trial-guard calculation before final state term/packing", time);
+        if (text.contains("Shizuka TTP HQ+") && text.contains(" LL+")) {
+            fields.remove("ttp_trial_requested_ms");
+            integer(text, "Shizuka TTP HQ\\+(\\d+) LL\\+\\d+ requested", "ttp_hq_trial_requested_ms", "ms", "DSP HQ request; not applied increment proof", time);
+            integer(text, "Shizuka TTP HQ\\+\\d+ LL\\+(\\d+) requested", "ttp_ll_trial_requested_ms", "ms", "DSP Adaptive LL request; not applied increment proof", time);
+            integer(text, "Shizuka TTP HQ\\+.*?calculated us (-?\\d+)", "calculated_ttp_us", "us", "post-trial-guard calculation before final state term/packing", time);
+        }
         Matcher debug = match("\\b(ENABLE_[A-Z0-9_]+|SIMULATE_FORCE_LOSSLESS) - (-?\\d+)", text);
         while (debug.find()) try {
             put("flag." + debug.group(1), Long.parseLong(debug.group(2)), "raw flag", "DSP debug configuration log", time);

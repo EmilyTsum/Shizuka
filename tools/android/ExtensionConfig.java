@@ -3,8 +3,12 @@ import java.util.*;
 
 /** Only extension controls live here. Android owns all per-device Bluetooth preferences. */
 final class ExtensionConfig {
-    static final String[] KEYS = {"schema", "classic_qhs_host_aware", "aptx_voice_enabled",
-                                 "adaptive_priority", "aptx_hd_priority", CodecTuning.KEY};
+    static final String[] KEYS = keys();
+    private static String[] keys() {
+        List<String> keys = new ArrayList<>(Arrays.asList("schema", "classic_qhs_host_aware", "aptx_voice_enabled", "adaptive_priority", "aptx_hd_priority"));
+        for (TuningCatalog.IntegerControl control : CodecTuning.CATALOG.controls) keys.add(control.key);
+        return keys.toArray(new String[0]);
+    }
     private static final Set<String> ALLOWED = new HashSet<>(Arrays.asList(KEYS));
     private static final Set<String> LEGACY_DEVICE_KEYS = new HashSet<>(Arrays.asList(
         "target_address", "startup_transport", "call_transport", "adaptive_apply_on_connect",
@@ -27,7 +31,7 @@ final class ExtensionConfig {
             if (line.isEmpty() || line.startsWith("#")) continue;
             int separator = line.indexOf('=');
             if (separator < 1) throw new IllegalArgumentException("expected key=value");
-            String key = line.substring(0, separator).trim();
+            String key = CodecTuning.canonicalOrOriginal(line.substring(0, separator).trim());
             String value = line.substring(separator + 1).trim();
             if (input.put(key, value) != null)
                 throw new IllegalArgumentException("duplicate key: " + key);
@@ -41,7 +45,8 @@ final class ExtensionConfig {
         Map<String, String> values = new LinkedHashMap<>();
         values.put("schema", "2");
         values.put("classic_qhs_host_aware", input.getOrDefault("classic_qhs_host_aware", "false"));
-        values.put(CodecTuning.KEY, input.getOrDefault(CodecTuning.KEY, "0"));
+        for (TuningCatalog.IntegerControl control : CodecTuning.CATALOG.controls)
+            values.put(control.key, input.getOrDefault(control.key, Integer.toString(control.defaultValue)));
         for (String key : new String[] {"aptx_voice_enabled", "adaptive_priority", "aptx_hd_priority"}) {
             String value = input.getOrDefault(key, "system");
             // These were forced defaults, not system preferences. Do not replay them on upgrade.
@@ -54,7 +59,8 @@ final class ExtensionConfig {
         return new ExtensionConfig(values, trusted, legacy);
     }
     private static void validate(Map<String, String> values) {
-        CodecTuning.value(values.get(CodecTuning.KEY));
+        for (TuningCatalog.IntegerControl control : CodecTuning.CATALOG.controls)
+            control.parse(values.get(control.key));
         choice("classic_qhs_host_aware", values.get("classic_qhs_host_aware"), "true", "false");
         choice("aptx_voice_enabled", values.get("aptx_voice_enabled"), "system", "true", "false");
         for (String key : new String[] {"adaptive_priority", "aptx_hd_priority"})
@@ -66,6 +72,7 @@ final class ExtensionConfig {
             throw new IllegalArgumentException("invalid " + key);
     }
     String value(String key) {
+        key = CodecTuning.canonicalOrOriginal(key);
         if (!ALLOWED.contains(key))
             throw new IllegalArgumentException("Android owns this preference; use device settings: " + key);
         return values.get(key);
@@ -80,6 +87,7 @@ final class ExtensionConfig {
         return new ExtensionConfig(migrated, trusted, false);
     }
     ExtensionConfig with(String key, String value) {
+        key = CodecTuning.canonicalOrOriginal(key);
         if ("schema".equals(key) || !ALLOWED.contains(key))
             throw new IllegalArgumentException("only extension settings can be saved: " + key);
         Map<String, String> updated = new LinkedHashMap<>(forMigration().values);

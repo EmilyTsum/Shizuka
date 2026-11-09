@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Build opt-in +50/+100 ms HQ/Lossless DSP experiments, without device writes."""
+"""Build an opt-in DSP tuning candidate using a reviewed exact-image backend."""
 
 import argparse
 import json
+import re
 import shutil
 from pathlib import Path
 
-from shizuka.ttp import inspect_stock, validate_control_plan, write_candidate
+from shizuka.project import digest
+from shizuka.ttp import build_candidate, inspect_stock, parameters_from_plan, resolve_backend
+from shizuka.tuning import control_for, integer, load_catalog
 
 
 def main():
@@ -17,11 +20,20 @@ def main():
         "inspect", help="verify the exact stock image and report compiled defaults"
     )
     inspect.add_argument("--input", type=Path, required=True)
+    inspect.add_argument("--profile", help="optional explicit runtime profile")
     build = sub.add_parser("build", help="create a candidate; never install or restart anything")
     build.add_argument("--input", type=Path, required=True)
-    tuning = build.add_mutually_exclusive_group(required=True)
-    tuning.add_argument("--delta-ms", type=int, choices=(0, 50, 100))
-    tuning.add_argument(
+    build.add_argument("--delta-ms", "--hq-delta-ms", type=int)
+    build.add_argument("--ll-delta-ms", type=int)
+    build.add_argument("--profile", help="optional explicit runtime profile")
+    build.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="KEY=INTEGER",
+        help="canonical tuning parameter (repeatable); domains come from capabilities",
+    )
+    build.add_argument(
         "--plan", type=Path, help="JSON plan from config.sh tuning plan or codec_control.py"
     )
     build.add_argument("--output", type=Path, required=True)
@@ -30,18 +42,63 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == "inspect":
-            result = inspect_stock(args.input.read_bytes())
+            result = inspect_stock(args.input.read_bytes(), args.profile)
         else:
             plan = None
+            backend = resolve_backend(profile=args.profile, stock_sha256=digest(args.input))
+            direct = list(args.set)
+            # Compatibility flags map into the same canonical key/value path.
+            for key, value in (
+                (getattr(backend, "HQ_KEY", None), args.delta_ms),
+                (getattr(backend, "LL_KEY", None), args.ll_delta_ms),
+            ):
+                if value is not None:
+                    if key is None:
+                        raise ValueError("This backend requires canonical --set parameters")
+                    direct.append(f"{key}={value}")
             if args.plan:
+                if direct:
+                    parser.error("--plan cannot be combined with direct parameters")
                 if args.plan.stat().st_size > 32768:
                     raise ValueError("Codec-control plan is too large")
                 plan = json.loads(args.plan.read_text())
-                args.delta_ms = validate_control_plan(plan)
-            if args.delta_ms and (not args.llvm_mc or not args.linker):
+                planned_backend, parameters = parameters_from_plan(plan)
+                if backend is not planned_backend:
+                    raise ValueError("Plan and input DSP backends differ")
+            else:
+                if not direct:
+                    parser.error(
+                        "Specify --plan, --set KEY=INTEGER or a compatibility increment flag"
+                    )
+                catalog = load_catalog()
+                profiles = [
+                    profile for profile in backend.PROFILE_IDS if profile in catalog["profiles"]
+                ]
+                keys = {
+                    provider["key"]
+                    for profile in profiles
+                    for provider in catalog["profiles"][profile]
+                    if provider["backend"] == backend.BACKEND_ID
+                }
+                parameters = {key: control_for(key, catalog)["default"] for key in keys}
+                seen = set()
+                for item in direct:
+                    name, separator, value = item.partition("=")
+                    control = control_for(name, catalog)
+                    key = control["key"]
+                    if (
+                        not separator
+                        or key not in keys
+                        or key in seen
+                        or not re.fullmatch(r"0|-?[1-9][0-9]*", value)
+                    ):
+                        raise ValueError("Invalid/duplicate DSP parameter: " + item)
+                    parameters[key] = integer(control, int(value))
+                    seen.add(key)
+            if any(parameters.values()) and (not args.llvm_mc or not args.linker):
                 parser.error("Set --llvm-mc and --linker to LLVM tools with Hexagon support")
-            result = write_candidate(
-                args.input, args.output, args.delta_ms, args.llvm_mc, args.linker, plan
+            result = build_candidate(
+                args.input, args.output, parameters, args.llvm_mc, args.linker, args.profile, plan
             )
         print(json.dumps(result, indent=2))
     except (ValueError, OSError) as error:

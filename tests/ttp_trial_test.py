@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from shizuka import ttp
+from shizuka.dsp_backends import samsung_dzif_ttp as ttp
 
 
 class TtpTrialGuards(unittest.TestCase):
@@ -37,9 +37,14 @@ class TtpTrialGuards(unittest.TestCase):
 
     def test_only_explicit_stages_are_accepted(self):
         with patch.object(ttp.subprocess, "run") as run:
-            for value in (0, -50, 49, 51, 99, 101, 1000, True, 50.0, "50", None):
-                with self.assertRaisesRegex(ValueError, "Only"):
+            for value in (-50, 101, 1000, True, 50.0, "50", None):
+                with self.assertRaisesRegex(ValueError, "Invalid"):
                     ttp.compile_patch(value, "not-run", "not-run")
+            run.assert_not_called()
+        with patch.object(ttp.subprocess, "run") as run:
+            for value in (-1, 101, True, 50.0, "50"):
+                with self.assertRaisesRegex(ValueError, "Invalid"):
+                    ttp.compile_patch(0, "not-run", "not-run", value)
             run.assert_not_called()
 
     def test_existing_output_is_never_replaced(self):
@@ -79,6 +84,27 @@ class TtpTrialGuards(unittest.TestCase):
             self.assertEqual(manifest["modified_ranges"], [])
             self.assertFalse(manifest["installed"])
             self.assertFalse(manifest["audio_verified"])
+
+
+class TtpBackendDispatch(unittest.TestCase):
+    def test_unknown_profile_has_no_samsung_fallback(self):
+        from shizuka.ttp import resolve_backend
+
+        for profile in ("another-phone", "samsung-sm-s931z-another-firmware"):
+            with self.assertRaisesRegex(ValueError, "Unsupported"):
+                resolve_backend(profile=profile)
+
+    def test_unknown_image_has_no_backend_fallback(self):
+        from shizuka.ttp import inspect_stock
+
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            inspect_stock(b"unknown firmware")
+
+    def test_zero_patch_uses_no_tool(self):
+        with patch.object(ttp.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "nonzero"):
+                ttp.compile_patch(0, "not-run", "not-run", 0)
+            run.assert_not_called()
 
 
 if __name__ == "__main__":

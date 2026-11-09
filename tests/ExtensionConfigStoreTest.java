@@ -44,7 +44,7 @@ public final class ExtensionConfigStoreTest {
         byte[] legacy = Files.readAllBytes(root.resolve("legacy.conf"));
         List<Process> processes = new ArrayList<>();
         String[][] changes = {{"adaptive_priority", "31"}, {"aptx_hd_priority", "32"},
-                              {"aptx_voice_enabled", "true"}, {"migrate", ""}};
+                              {"aptx_voice_enabled", "true"}, {"aptx_hq_ttp_delta_ms", "37"}, {"adaptive_ll_ttp_delta_ms", "23"}, {"migrate", ""}};
         String java = Paths.get(System.getProperty("java.home"), "bin/java").toString();
         try {
             for (String[] change : changes) {
@@ -63,6 +63,9 @@ public final class ExtensionConfigStoreTest {
             check(result.value("adaptive_priority").equals("31"));
             check(result.value("aptx_hd_priority").equals("32"));
             check(result.value("aptx_voice_enabled").equals("true"));
+            check(result.value("adaptive_hq_ttp_delta_ms").equals("37"));
+            check(result.value("adaptive_ll_ttp_delta_ms").equals("23"));
+            check(!text(root.resolve("config/config.conf")).contains("aptx_hq_ttp_delta_ms"));
             check(Arrays.equals(legacy, Files.readAllBytes(root.resolve("legacy.conf"))));
         } finally {
             for (Process process : processes) if (process.isAlive()) process.destroyForcibly().waitFor();

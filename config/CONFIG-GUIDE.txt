@@ -17,11 +17,16 @@ aptx_hd_priority=system: leave Android's priority property unchanged.
 Explicit voice/priority property overrides are applied on module activation. Property recovery
 restores only this activation's changes and preserves later user/system changes.
 
-aptx_hq_ttp_delta_ms=0: saved HQ tuning intent (0, 50, 100 ms), shared by Adaptive
-HQ and Lossless HQ. config.sh tuning capabilities|get|set|plan provides JSON.
-Saving this value or running KernelSU Action does not apply it; it feeds an
-offline exact-image DSP candidate build and fresh-graph trial. LL and independent
-per-codec delay controls are not implemented. See docs/CONTROLS.md in the repo.
+adaptive_hq_ttp_delta_ms=0: saved Adaptive/Lossless HQ TTP intent.
+adaptive_ll_ttp_delta_ms=0: independent Adaptive LL TTP intent.
+Both accept integer 0..100 ms (step 1), default 0. The old aptx_hq_ttp_delta_ms
+spelling is accepted on input; saves use adaptive_ names. Duplicate aliases fail.
+config.sh tuning capabilities|get|set|plan provides versioned JSON. Capabilities
+come from typed definitions and per-device providers. Adaptive LL playback was
+already supported; these controls add TTP tuning. Separate aptX LL tuning and
+independent HQ Adaptive/Lossless increments have no provider yet.
+Saving or KernelSU Action does not apply DSP tuning. Generate a verified offline
+candidate, then measure a fresh DSP graph. See docs/CONTROLS.md in the repo.
 
 Opt-in diagnostics.sh capture SECONDS (5..120) exports stock DSP observations.
 diagnostics.sh list / export SESSION / recover manages private session files.

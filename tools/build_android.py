@@ -14,6 +14,7 @@ from shizuka.artifacts import NATIVE_VALIDATION, write_metadata
 from shizuka.java import java_tools
 from shizuka.profiles import load_profile
 from shizuka.project import ANDROID, android_sources_fingerprint, digest, inputs_dir, option
+from shizuka.tuning import verify_generated
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
@@ -136,6 +137,7 @@ def build_status(tools, android):
 
 
 def main():
+    verify_generated()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--helpers-only",
