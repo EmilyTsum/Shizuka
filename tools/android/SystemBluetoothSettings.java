@@ -111,7 +111,7 @@ final class SystemBluetoothSettings implements DevicePreferences.SystemStore {
         if (preference != -1 && a2dp.getConnectedDevices().contains(device))
             call(a2dp, preference == 1 ? "enableOptionalCodecs" : "disableOptionalCodecs", new Class<?>[] {BluetoothDevice.class}, device);
     }
-    private void finish(String[] command) {
+    private void finish(DevicePreferences.Command command) {
         if (finished) return;
         finished = true;
         int status = 0;
@@ -125,7 +125,7 @@ final class SystemBluetoothSettings implements DevicePreferences.SystemStore {
         }
         System.exit(status);
     }
-    static void run(BluetoothRuntime runtime, String address, String[] command) throws Exception {
+    static void run(BluetoothRuntime runtime, String address, DevicePreferences.Command command) throws Exception {
         if (!runtime.adapter.isEnabled()) throw new IllegalStateException("Bluetooth is off");
         SystemBluetoothSettings settings = new SystemBluetoothSettings(runtime, resolve(runtime.adapter, address));
         Handler handler = new Handler(Looper.getMainLooper());

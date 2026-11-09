@@ -19,14 +19,20 @@ from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from shizuka.artifacts import verify_android_build, verify_native_build  # noqa: E402
+from shizuka.artifacts import (
+    native_build_snapshot,
+    record_native_build,
+    record_native_validation,
+    verify_android_build,
+    verify_native_build,
+    verify_native_validation,
+)  # noqa: E402
 from shizuka.profiles import DeviceProfile, load_profile  # noqa: E402
 from shizuka.project import (
     android_sources_fingerprint,
     digest,
     inputs_dir,
     native_options,
-    native_sources_fingerprint,
     offline_sources_fingerprint,
 )  # noqa: E402
 from shizuka.validation import required_tests, validate_evidence
@@ -135,7 +141,7 @@ class Profiles(unittest.TestCase):
                 native_options()
 
     def test_build_frontend_import_has_no_ndk_or_input_side_effects(self):
-        for name in ["build.py", "build_android.py", "verify_offline.py"]:
+        for name in ["build.py", "build_android.py", "verify_offline.py", "build_all.py"]:
             spec = importlib.util.spec_from_file_location(
                 "frontend_" + name.replace(".", "_"), ROOT / "tools" / name
             )
@@ -232,17 +238,22 @@ class Profiles(unittest.TestCase):
             item.write_bytes(b"synthetic output")
         identity = {"profile_id": self.profile.id, "profile_fingerprint": self.profile.fingerprint}
         android = {
+            "schema": 1,
             **identity,
             "sources_fingerprint": android_sources_fingerprint(),
             "apk_patches_sha256": digest(self.profile.apk_patches),
             "outputs": {name: digest(self.d / path) for name, path in outputs.items()},
         }
-        native = {
-            **identity,
-            "sources_fingerprint": native_sources_fingerprint(self.profile.driver),
-        }
         (self.d / "android-build.json").write_text(json.dumps(android))
-        (self.d / "native-build.json").write_text(json.dumps(native))
+        manifest = []
+        for name in self.profile.data["payloads"].values():
+            path = self.d / name
+            if not path.exists():
+                path.write_bytes(b"synthetic payload fixture")
+            manifest.append({"output": name, "output_sha256": digest(path), **identity})
+        (self.d / "patch-manifest.json").write_text(json.dumps(manifest))
+        record_native_build(self.profile, {"RATE": 96000, "MODE": 4096, "R2": 3}, self.d)
+        native = json.loads((self.d / "native-build.json").read_text())
         return android, native
 
     def test_artifacts_require_current_profile_source_and_output_hashes(self):
@@ -262,6 +273,68 @@ class Profiles(unittest.TestCase):
         (self.d / "policy-dex/classes.dex").write_bytes(b"changed")
         with self.assertRaises(ValueError):
             verify_android_build(self.profile, self.d)
+
+    def test_native_validation_binds_artifacts_and_requires_a_real_success_boolean(self):
+        self.build_metadata()
+        with self.assertRaises(ValueError):
+            verify_native_validation(self.profile, self.d)
+        record_native_validation(self.profile, native_build_snapshot(self.profile, self.d), self.d)
+        verify_native_validation(self.profile, self.d)
+        path = self.d / "native-validation.json"
+        original = json.loads(path.read_text())
+        for field, wrong in [("passed", "true"), ("builds", {}), ("sources_fingerprint", "old")]:
+            changed = {**original, field: wrong}
+            path.write_text(json.dumps(changed))
+            with self.assertRaises(ValueError):
+                verify_native_validation(self.profile, self.d)
+        path.write_text(json.dumps(original))
+        native = self.d / self.profile.data["payloads"]["native"]
+        native.write_bytes(b"different native output")
+        # A matching hand-edited manifest still cannot revive a previous build record.
+        manifest = json.loads((self.d / "patch-manifest.json").read_text())
+        for entry in manifest:
+            if entry["output"] == native.name:
+                entry["output_sha256"] = digest(native)
+        (self.d / "patch-manifest.json").write_text(json.dumps(manifest))
+        with self.assertRaises(ValueError):
+            verify_native_build(self.profile, self.d)
+        with self.assertRaises(ValueError):
+            verify_native_validation(self.profile, self.d)
+
+    def test_malformed_manifest_and_metadata_are_reported_as_validation_errors(self):
+        self.build_metadata()
+        for value in [[], None, "not metadata"]:
+            (self.d / "native-build.json").write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                verify_native_build(self.profile, self.d)
+        android, _ = self.build_metadata()
+        android["outputs"] = []
+        (self.d / "android-build.json").write_text(json.dumps(android))
+        with self.assertRaises(ValueError):
+            verify_android_build(self.profile, self.d)
+        self.build_metadata()
+        for value in [None, {}, [None], [{"output": []}]]:
+            (self.d / "patch-manifest.json").write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                verify_native_build(self.profile, self.d)
+
+    def test_replacing_a_build_during_dispatch_cannot_validate_the_replacement(self):
+        self.build_metadata()
+        before = native_build_snapshot(self.profile, self.d)
+        native = self.d / self.profile.data["payloads"]["native"]
+        native.write_bytes(b"replacement build fixture")
+        manifest_path = self.d / "patch-manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        for entry in manifest:
+            if entry["output"] == native.name:
+                entry["output_sha256"] = digest(native)
+        manifest_path.write_text(json.dumps(manifest))
+        record_native_build(self.profile, {"RATE": 48000, "MODE": 4096, "R2": 3}, self.d)
+        # Both builds are individually consistent; dispatch covered the first, not its replacement.
+        verify_native_build(self.profile, self.d)
+        with self.assertRaisesRegex(ValueError, "Artifacts changed"):
+            record_native_validation(self.profile, before, self.d)
+        self.assertFalse((self.d / "native-validation.json").exists())
 
     def test_fingerprint_changes_with_profile_data(self):
         data = copy.deepcopy(self.profile.data)
@@ -315,6 +388,7 @@ class Profiles(unittest.TestCase):
                 }
             )
         (self.d / "patch-manifest.json").write_text(json.dumps(manifest))
+        record_native_build(self.profile, {"RATE": 96000, "MODE": 4096, "R2": 3}, self.d)
         repository = self.d / "repository"
         repository.mkdir()
         for directory in ["module", "config"]:
@@ -337,6 +411,10 @@ class Profiles(unittest.TestCase):
         package = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(package)
         package.ROOT, package.BUILD, package.DIST = repository, self.d, self.d / "dist"
+        with self.assertRaises(ValueError):
+            package.main()
+        self.assertFalse(package.DIST.exists())
+        record_native_validation(self.profile, native_build_snapshot(self.profile, self.d), self.d)
         with contextlib.redirect_stdout(io.StringIO()):
             package.main()
         with zipfile.ZipFile(next(package.DIST.glob("*.zip"))) as archive:

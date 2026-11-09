@@ -22,7 +22,9 @@ sh /data/adb/modules/s25_aptx_adaptive/config.sh device AA:BB:CC:DD:EE:FF profil
 sh /data/adb/modules/s25_aptx_adaptive/config.sh device AA:BB:CC:DD:EE:FF optional-codecs true
 ```
 
-`active` requires one unambiguous active device. An explicit address must already be bonded. Output includes Android's saved transport, connection policies, optional-codec permission and current codec status. Missing APIs/profiles are reported per field. A write rejected or not confirmed by Android fails instead of saving a plugin fallback. Codec changes and detailed parameters remain in Android Settings/Developer Options; Shizuka adds no persistent shadow store for values the OS does not retain.
+`active` requires one unambiguous active device. An explicit address must already be bonded. Command/address validation happens before Android service initialization; `config.sh help` works without contacting Bluetooth or reading extension configuration. Output includes Android's saved transport, connection policies, optional-codec permission and current codec status. Missing APIs/profiles are reported per field. A write rejected or not confirmed by Android fails instead of saving a plugin fallback. Codec changes and detailed parameters remain in Android Settings/Developer Options; Shizuka adds no persistent shadow store for values the OS does not retain.
+
+Status retains the codec name reported by Android. Private Lossless/LL IDs, Adaptive mode words and DSP session matching are interpreted only for the verified Samsung backend; an unknown codec's numeric fields are not labeled HQ or low latency by guesswork.
 
 ## Extension file
 

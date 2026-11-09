@@ -24,6 +24,10 @@ public final class SystemPreferencesTest {
         check(defaults.value("adaptive_priority").equals("system"));
         check(defaults.value("aptx_voice_enabled").equals("system"));
         check(!defaults.qhsEnabled());
+        check(DevicePreferences.address("active").equals("active"));
+        check(DevicePreferences.address("aa:bb:cc:dd:ee:ff").equals("AA:BB:CC:DD:EE:FF"));
+        for (String address : new String[] {"", "aa:bb:cc:dd:ee", "AA-BB-CC-DD-EE-FF", "aa:bb:cc:dd:ee:gg"})
+            invalid(() -> DevicePreferences.address(address));
         String legacy = "schema=1\ntarget_address=01:02:03:04:05:06\nstartup_transport=classic\ncall_transport=le\n"
             + "adaptive_apply_on_connect=true\nadaptive_rate=48000\nadaptive_bits=24\nadaptive_mode=hq\n"
             + "adaptive_priority=4001\naptx_hd_priority=4001\naptx_voice_enabled=false\nclassic_qhs_host_aware=true\n"
@@ -69,9 +73,14 @@ public final class SystemPreferencesTest {
         AndroidStore second = new AndroidStore(system);
         check(DevicePreferences.execute(second, new String[] {"get"}).get("transport_output").equals("classic"));
         check(second.writes == 0);
+        String[] arguments = {"transport", "output", "le"};
+        DevicePreferences.Command parsed = DevicePreferences.parse(arguments);
+        arguments[2] = "classic";
+        DevicePreferences.execute(second, parsed);
+        check(system.get("transport_output").equals("le"));
         system.put("codec", "SBC/48000/16");
         check(DevicePreferences.execute(second, new String[] {}).get("codec").equals("SBC/48000/16"));
-        check(second.writes == 0);
+        check(second.writes == 1);
         DevicePreferences.execute(second, new String[] {"profile", "a2dp", "false"});
         check(system.get("profile_a2dp").equals("false"));
         DevicePreferences.execute(second, new String[] {"optional-codecs", "true"});

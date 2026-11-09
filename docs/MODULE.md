@@ -47,4 +47,4 @@ node tests/status_webui_test.cjs
 
 The lifecycle harness uses temporary state and property databases, real host file locks through Python's POSIX `fcntl` module, and fake Android boundaries. It covers queued stale recovery, detached-worker descriptors, PID reuse, live payload mismatches, recovery failure, and exact property restoration. A real numeric `/proc` identity check is skipped on hosts that do not expose that record; synthetic process-record checks still run. The optional host BusyBox supplies its shell and other applets; the harness supplies file locking even when that BusyBox build omits `flock`.
 
-`tools/verify_offline.py` records the lifecycle suite with the existing native, Java, and QHS checks. `tools/package.py` requires this result before packaging a new archive.
+`tools/verify_offline.py` records the lifecycle suite with the existing native, Java, and QHS checks. `tools/package.py` requires both that host evidence and a current build-bound native integration result from full verification. Host-only checks cannot create the integration result; see [PORTING.md](PORTING.md).

@@ -26,7 +26,7 @@ public class BtStatus {
     static final Path LEGACY_DATA = Paths.get("/data/adb/s25_bluetooth");
     static Object call(Object target, String name, Class<?>[] types, Object... args)
         throws Exception {
-        return target.getClass().getMethod(name, types).invoke(target, args);
+        return BluetoothRuntime.call(target, name, types, args);
     }
     static Object get(Object target, String name) throws Exception {
         return call(target, name, new Class<?>[] {});
@@ -56,8 +56,8 @@ public class BtStatus {
         }
         return new JSONArray(values);
     }
-    static boolean privateCodecProfile() throws Exception {
-        return moduleRoot != null && "samsung-sm-s931z-dzif".equals(read(moduleRoot.resolve("device-profile").toString()));
+    static String deviceProfile() throws Exception {
+        return moduleRoot == null ? "" : read(moduleRoot.resolve("device-profile").toString());
     }
     static JSONObject codec(Object c, boolean le) throws Exception {
         JSONObject j = new JSONObject();
@@ -66,32 +66,23 @@ public class BtStatus {
         j.put("available", true);
         int type = ((Number)get(c, "getCodecType")).intValue();
         j.put("type", type);
-        String name;
-        boolean privateProfile = privateCodecProfile();
-        j.put("lossless_selection", !le && privateProfile && type == 12);
-        if (!le && privateProfile && type == 12)
-            name = "aptX Lossless (selection)";
-        else if (!le && privateProfile && type == 13)
-            name = "aptX LL";
-        else {
-            try {
-                name = String.valueOf(get(c, "getCodecName"));
-            } catch (NoSuchMethodException e) {
-                Matcher match = Pattern.compile("codecName[:=]([^,}\\]]+)").matcher(c.toString());
-                name = match.find() ? match.group(1).trim() : "Codec " + type;
-            }
+        String profile = deviceProfile();
+        String name = null;
+        try {
+            name = (String)get(c, "getCodecName");
+        } catch (UnsupportedOperationException e) {
+            Matcher match = Pattern.compile("codecName[:=]([^,}\\]]+)").matcher(c.toString());
+            if (match.find()) name = match.group(1).trim();
         }
-        j.put("name", name);
+        j.put("lossless_selection", CodecPresentation.losslessSelection(profile, le, type));
+        j.put("name", CodecPresentation.name(profile, le, type, name));
         int rate = ((Number)get(c, "getSampleRate")).intValue();
         int bits = ((Number)get(c, "getBitsPerSample")).intValue();
         j.put("sample_rates_hz", numericFlags(c, "SAMPLE_RATE_", rate));
         j.put("bit_depths", numericFlags(c, "BITS_PER_SAMPLE_", bits));
         if (!le) {
             long mode = ((Number)get(c, "getCodecSpecific1")).longValue();
-            j.put("mode", privateProfile && type == 12 ? "Lossless request"
-                          : mode == 4096 ? "HQ"
-                          : mode == 8192 ? "Low latency"
-                                         : "Default");
+            j.put("mode", CodecPresentation.mode(profile, type, mode));
         } else {
             int duration = ((Number)get(c, "getFrameDuration")).intValue();
             j.put("frame_durations_us", numericFlags(c, "FRAME_DURATION_", duration));
@@ -138,6 +129,7 @@ public class BtStatus {
             return out;
         List<?> devices =
             (List<?>)call(adapter, "getActiveDevices", new Class<?>[] {int.class}, id);
+        if (devices == null) return out;
         for (Object one : devices) {
             if (!(one instanceof BluetoothDevice))
                 continue;
@@ -180,7 +172,7 @@ public class BtStatus {
     static JSONObject telemetry(JSONObject route, JSONArray devices) throws Exception {
         JSONObject out =
             new JSONObject().put("available", false).put("reason", "Diagnostics are not running");
-        if (moduleRoot == null) return out;
+        if (!CodecPresentation.SAMSUNG_DZIF.equals(deviceProfile())) return out;
         Path telemetry = DATA.resolve("telemetry.json");
         if (!Files.exists(telemetry)) telemetry = LEGACY_DATA.resolve("telemetry.json");
         String text = read(telemetry.toString());

@@ -7,7 +7,7 @@ import shutil
 import zipfile
 from pathlib import Path
 
-from shizuka.artifacts import verify_android_build, verify_native_build
+from shizuka.artifacts import read_manifest, verify_native_validation
 from shizuka.profiles import load_profile
 from shizuka.validation import validate_evidence
 
@@ -24,18 +24,8 @@ def main():
     profile = load_profile()
     tests = json.loads((ROOT / "evidence/ll-offline-tests.json").read_text())
     validate_evidence(tests, profile)
-    manifest = json.loads((BUILD / "patch-manifest.json").read_text())
-    expected = set(profile.data["payloads"].values())
-    if len(manifest) != len(expected) or {entry["output"] for entry in manifest} != expected:
-        raise SystemExit("Native, HAL, APK and runtime property outputs are required.")
-    if any(
-        entry.get("profile_id") != profile.id
-        or entry.get("profile_fingerprint") != profile.fingerprint
-        for entry in manifest
-    ):
-        raise SystemExit("Payload manifest belongs to a different device profile.")
-    verify_android_build(profile, BUILD)
-    verify_native_build(profile, BUILD)
+    manifest = read_manifest(profile, BUILD)
+    verify_native_validation(profile, BUILD)
     stage = BUILD / "package"
     shutil.rmtree(stage, ignore_errors=True)
     shutil.copytree(

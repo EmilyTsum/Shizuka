@@ -52,7 +52,7 @@ case "${1:-get}" in
   "$BB" setsid "$BB" sh "$0" watch 9>&- > "$MODDIR/state/policy.log" 2>&1 < /dev/null &
   launched=$!
   if ! record_process policy "$launched";then kill -TERM "$launched" 2>/dev/null || true;fail 'policy watcher exited before its identity could be recorded';fi;;
- get|value|validate|set|migrate|device)
+ get|value|validate|set|migrate|device|help|--help)
   exec app_process /system/bin BtConfig "$CONFIG_FILE" "$LEGACY_CONFIG" "$@";;
  *) echo 'usage: config.sh get|validate|set EXTENSION VALUE|migrate|device ADDRESS|active [get|transport|profile|optional-codecs]|controller-features|start|stop' >&2;exit 1;;
 esac

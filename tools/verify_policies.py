@@ -24,6 +24,7 @@ def verify_policies(android_jar=None):
             "ControllerFeaturesSchema",
             "ExtensionConfig",
             "DevicePreferences",
+            "CodecPresentation",
         ]
     ]
     subprocess.run(
@@ -74,21 +75,29 @@ def verify_policies(android_jar=None):
         )
         # Disabled/default policy must work without a phone or even a configuration file.
         missing = BUILD / "missing-extension-config"
-        for action in ["get", "validate", "watch"]:
+        cli = [
+            java,
+            "-cp",
+            os.pathsep.join([str(android_classes), str(jar)]),
+            "BtConfig",
+            str(missing / "new.conf"),
+            str(missing / "legacy.conf"),
+        ]
+        for action in ["get", "validate", "watch", "help"]:
             output = subprocess.check_output(
-                [
-                    java,
-                    "-cp",
-                    os.pathsep.join([str(android_classes), str(jar)]),
-                    "BtConfig",
-                    str(missing / "new.conf"),
-                    str(missing / "legacy.conf"),
-                    action,
-                ],
+                [*cli, action],
                 text=True,
             )
             if action == "watch" and "extension_watch=disabled" not in output:
                 raise AssertionError("Default policy unexpectedly started a resident service")
+        for command, expected in [
+            (["device", "active", "transport", "output", "invalid"], "invalid transport"),
+            (["device", "not-an-address", "get"], "invalid Bluetooth address"),
+            (["device", "active", "profile", "unknown", "true"], "invalid profile"),
+        ]:
+            result = subprocess.run([*cli, *command], capture_output=True, text=True)
+            if result.returncode != 1 or expected not in result.stderr or "Stub!" in result.stderr:
+                raise AssertionError("Invalid command reached Android services: " + result.stderr)
         print(
             "Android helpers compiled; default configuration and disabled watcher run without Android services."
         )

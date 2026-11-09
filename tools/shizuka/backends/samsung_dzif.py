@@ -468,6 +468,7 @@ def build(profile):
         entry["profile_id"] = profile.id
         entry["profile_fingerprint"] = profile.fingerprint
     (BUILD / "patch-manifest.json").write_text(json.dumps(results, indent=2) + "\n")
+    return options
 
 
 HOST_REQUIRES_JNI = True

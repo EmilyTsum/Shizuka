@@ -10,6 +10,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+from shizuka.artifacts import NATIVE_VALIDATION, write_metadata
 from shizuka.java import java_tools
 from shizuka.profiles import load_profile
 from shizuka.project import ANDROID, android_sources_fingerprint, digest, inputs_dir, option
@@ -143,6 +144,7 @@ def build_status(tools, android):
             str(classes),
             str(ANDROID / "BtStatus.java"),
             str(ANDROID / "BluetoothRuntime.java"),
+            str(ANDROID / "CodecPresentation.java"),
         ],
         check=True,
     )
@@ -171,6 +173,8 @@ def main():
     )
     args = parser.parse_args()
     if not args.helpers_only:
+        for name in ("android-build.json", NATIVE_VALIDATION):
+            (BUILD / name).unlink(missing_ok=True)
         check_inputs()
     tools, android = sdk_paths(require_apk=not args.helpers_only)
     BUILD.mkdir(parents=True, exist_ok=True)
@@ -194,25 +198,23 @@ def main():
         print(bundle)
         return
     profile = load_profile()
-    (BUILD / "android-build.json").write_text(
-        json.dumps(
-            {
-                "profile_id": profile.id,
-                "profile_fingerprint": profile.fingerprint,
-                "sources_fingerprint": android_sources_fingerprint(),
-                "apk_patches_sha256": digest(profile.apk_patches),
-                "outputs": {
-                    name: digest(BUILD / path)
-                    for name, path in {
-                        "apk": "patched-Bluetooth.apk",
-                        "policy": "policy-dex/classes.dex",
-                        "status": "status-dex/classes.dex",
-                    }.items()
-                },
+    write_metadata(
+        BUILD / "android-build.json",
+        {
+            "schema": 1,
+            "profile_id": profile.id,
+            "profile_fingerprint": profile.fingerprint,
+            "sources_fingerprint": android_sources_fingerprint(),
+            "apk_patches_sha256": digest(profile.apk_patches),
+            "outputs": {
+                name: digest(BUILD / path)
+                for name, path in {
+                    "apk": "patched-Bluetooth.apk",
+                    "policy": "policy-dex/classes.dex",
+                    "status": "status-dex/classes.dex",
+                }.items()
             },
-            indent=2,
-        )
-        + "\n"
+        },
     )
 
 

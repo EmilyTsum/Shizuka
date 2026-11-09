@@ -4,6 +4,7 @@ import java.util.Arrays;
 
 /** CLI boundary: extension files and Android device settings have separate ownership. */
 public final class BtConfig {
+    static final String USAGE = "config.sh get|validate|value KEY|set KEY VALUE|migrate|" + DevicePreferences.USAGE + "|watch";
     public static void main(String[] args) {
         try { run(args); }
         catch (Exception e) {
@@ -13,14 +14,21 @@ public final class BtConfig {
     }
     static void run(String[] args) throws Exception {
         if (args.length < 3) throw new IllegalArgumentException("canonical path, legacy path and action required");
-        ExtensionConfigStore store = new ExtensionConfigStore(Paths.get(args[0]), Paths.get(args[1]));
         String action = args[2];
-        // Device operations do not depend on, read, or write the extension configuration.
-        if ("device".equals(action)) {
-            if (args.length < 4) throw new IllegalArgumentException("device ADDRESS|active [operation]");
-            SystemBluetoothSettings.run(BluetoothRuntime.connect(), args[3], Arrays.copyOfRange(args, 4, args.length));
+        if ("help".equals(action) || "--help".equals(action)) {
+            requireCount(args, 3);
+            System.out.println(USAGE);
             return;
         }
+        // Device operations do not depend on, read, or write the extension configuration.
+        if ("device".equals(action)) {
+            if (args.length < 4) throw new IllegalArgumentException(DevicePreferences.USAGE);
+            String address = DevicePreferences.address(args[3]);
+            DevicePreferences.Command command = DevicePreferences.parse(Arrays.copyOfRange(args, 4, args.length));
+            SystemBluetoothSettings.run(BluetoothRuntime.connect(), address, command);
+            return;
+        }
+        ExtensionConfigStore store = new ExtensionConfigStore(Paths.get(args[0]), Paths.get(args[1]));
         ExtensionConfig config = store.read();
         switch (action) {
         case "get":
@@ -45,7 +53,7 @@ public final class BtConfig {
             if (!config.qhsEnabled()) { System.out.println("extension_watch=disabled"); return; }
             new QhsController(BluetoothRuntime.connect(), store).watch(); return;
         default:
-            throw new IllegalArgumentException("use get|validate|value KEY|set KEY VALUE|migrate|device ADDRESS|active [operation]|watch; codec selection belongs to Android");
+            throw new IllegalArgumentException(USAGE + "; codec selection belongs to Android");
         }
     }
     private static void requireCount(String[] args, int count) {

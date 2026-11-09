@@ -53,6 +53,6 @@ python tests/device_profiles_test.py
 node tests/status_webui_test.cjs
 ```
 
-The full offline command also rebuilds native artifacts and runs the ARM64 dispatch emulator. Packaging rejects stale source/test evidence, mismatched profiles, changed outputs, and inherited runtime state/audio proofs. Host checks do not establish device/reboot/audio correctness. See [MODULE.md](docs/MODULE.md) for recovery behavior.
+The full offline command also rebuilds native artifacts and runs the ARM64 dispatch emulator. Packaging requires its build-bound integration result as well as host evidence; `--host-only` alone cannot make a native module packageable. Failed rebuild/verification attempts invalidate previous success records. Packaging also rejects stale source/test evidence, mismatched profiles, changed outputs, and inherited runtime state/audio proofs. Host checks do not establish device/reboot/audio correctness. See [MODULE.md](docs/MODULE.md) for recovery behavior.
 
 GPL-2.0-only; this covers repository code and modifications, not proprietary stock inputs.
