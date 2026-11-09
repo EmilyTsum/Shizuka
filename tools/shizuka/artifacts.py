@@ -87,6 +87,8 @@ def verify_android_build(profile, build=BUILD):
         "status": "status-dex/classes.dex",
     }
     outputs = {name: digest(build / path) for name, path in paths.items()}
+    if outputs["policy"] != outputs["status"]:
+        raise ValueError("Shared Android tool libraries differ; rebuild Android artifacts")
     if metadata.get("outputs") != outputs:
         raise ValueError(
             "Android outputs do not match their build record; rebuild Android artifacts"

@@ -105,9 +105,7 @@ def build_policy(tools, android):
             str(android),
             "-d",
             str(classes),
-            *map(
-                str, sorted(path for path in ANDROID.glob("*.java") if path.name != "BtStatus.java")
-            ),
+            *map(str, sorted(ANDROID.glob("*.java"))),
         ],
         check=True,
     )
@@ -128,43 +126,12 @@ def build_policy(tools, android):
 
 
 def build_status(tools, android):
-    _, javac = java_tools()
-    classes = BUILD / "status-classes"
+    # One tool library for status, controls and diagnostics; keep both legacy
+    # artifact names so existing lifecycle scripts and upgrade paths remain valid.
     dex = BUILD / "status-dex"
-    shutil.rmtree(classes, ignore_errors=True)
     shutil.rmtree(dex, ignore_errors=True)
-    classes.mkdir(parents=True)
     dex.mkdir(parents=True)
-    subprocess.run(
-        [
-            *javac,
-            "--release",
-            "8",
-            "-classpath",
-            str(android),
-            "-d",
-            str(classes),
-            str(ANDROID / "BtStatus.java"),
-            str(ANDROID / "BluetoothRuntime.java"),
-            str(ANDROID / "CodecPresentation.java"),
-            str(ANDROID / "ProfileSession.java"),
-            str(ANDROID / "BluetoothProfiles.java"),
-        ],
-        check=True,
-    )
-    subprocess.run(
-        [
-            str(tools / "d8"),
-            "--min-api",
-            "34",
-            "--lib",
-            str(android),
-            "--output",
-            str(dex),
-            *map(str, sorted(classes.glob("*.class"))),
-        ],
-        check=True,
-    )
+    shutil.copy2(BUILD / "policy-dex/classes.dex", dex / "classes.dex")
     return dex / "classes.dex"
 
 
@@ -190,7 +157,14 @@ def main():
         bundle = BUILD / "android-tools"
         shutil.rmtree(bundle, ignore_errors=True)
         (bundle / "lib").mkdir(parents=True)
-        for path in ["config.sh", "status.sh", "lib/config.sh", "lib/runtime.sh", "lib/policy.sh"]:
+        for path in [
+            "config.sh",
+            "status.sh",
+            "diagnostics.sh",
+            "lib/config.sh",
+            "lib/runtime.sh",
+            "lib/policy.sh",
+        ]:
             shutil.copy2(ROOT / "module" / path, bundle / path)
         shutil.copy2(BUILD / "policy-dex/classes.dex", bundle / "policy.dex")
         shutil.copy2(BUILD / "status-dex/classes.dex", bundle / "status.dex")
@@ -201,6 +175,9 @@ def main():
         )
         print(bundle)
         return
+    from build_diagnostics import build_diagnostics
+
+    build_diagnostics()
     profile = load_profile()
     write_metadata(
         BUILD / "android-build.json",

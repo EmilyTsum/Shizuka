@@ -17,3 +17,4 @@ for item in "$MODPATH"/*; do
   set_perm "$item" 0 0 0644
  fi
 done
+[ ! -f "$MODPATH/dsp-capture" ] || set_perm "$MODPATH/dsp-capture" 0 0 0755

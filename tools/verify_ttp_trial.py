@@ -9,7 +9,15 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from shizuka.ttp import CAVE, HOOK, MAX_WIRE_US, compile_patch, patch_verified, sha256
+from shizuka.ttp import (
+    CAVE,
+    HOOK,
+    MAX_WIRE_US,
+    compile_patch,
+    patch_verified,
+    sha256,
+    validate_control_plan,
+)
 
 
 def vectors(delta_ms):
@@ -139,6 +147,10 @@ SECTIONS {
 def build_harness(candidate, manifest, stock, destination, llvm_mc, linker):
     pieces = compile_patch(manifest["delta_ms"], llvm_mc, linker)
     expected, expected_manifest = patch_verified(stock, manifest["delta_ms"], pieces)
+    if "control_plan" in manifest:
+        if validate_control_plan(manifest["control_plan"]) != manifest["delta_ms"]:
+            raise ValueError("TTP increment differs from the control plan")
+        expected_manifest["control_plan"] = manifest["control_plan"]
     if candidate != expected or manifest != expected_manifest:
         raise ValueError("Candidate/manifest is not the reproducible exact-stock patch")
     cases = vectors(manifest["delta_ms"])

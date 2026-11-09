@@ -30,11 +30,11 @@ public class BtStatus {
     }
     static String read(String path) throws Exception {
         Path p = Paths.get(path);
-        if (!Files.isRegularFile(p) || Files.size(p) > 32768)
+        if (!Files.isRegularFile(p) || Files.size(p) > 65536)
             return "";
         return new String(Files.readAllBytes(p), StandardCharsets.UTF_8).trim();
     }
-    static void error(String scope, Exception e) {
+    static synchronized void error(String scope, Exception e) {
         errors.put(scope + ": " + e.getClass().getSimpleName());
     }
     static JSONArray numericFlags(Object codec, String prefix, int mask) throws Exception {
@@ -176,6 +176,8 @@ public class BtStatus {
         if (text.isEmpty())
             return out;
         JSONObject t = new JSONObject(text);
+        if (t.optInt("schema") != 2 || !t.optBoolean("running") || !t.optBoolean("available"))
+            return out.put("reason", t.optString("reason", "No current encoder observation"));
         double age = System.nanoTime() / 1e9 - t.optDouble("monotonic_s", -1);
         if (!Double.isFinite(age) || age < 0 || age > 3)
             return out.put("reason", "Last DSP observation is stale");
@@ -184,15 +186,34 @@ public class BtStatus {
         if (!bt.matches("[1-9][0-9]+") || !hal.matches("[1-9][0-9]+") ||
             !Files.isDirectory(Paths.get("/proc", bt)) ||
             !Files.isDirectory(Paths.get("/proc", hal)) ||
-            !bt.equals(t.optString("bluetooth_pid")) || !hal.equals(t.optString("hal_pid")))
+            !bt.equals(t.optString("bluetooth_pid")) || !hal.equals(t.optString("hal_pid")) ||
+            !BtDiagnostics.start(bt).equals(t.optString("bluetooth_start")) ||
+            !BtDiagnostics.start(hal).equals(t.optString("hal_start")) ||
+            !read(moduleRoot.resolve("state/bt.start").toString()).equals(t.optString("bluetooth_start")) ||
+            !read(moduleRoot.resolve("state/hal.start").toString()).equals(t.optString("hal_start")) ||
+            !read("/proc/sys/kernel/random/boot_id").equals(t.optString("boot_id")))
             return out.put("reason", "DSP observation belongs to a different session");
+        JSONObject fields = t.optJSONObject("fields");
+        if (fields == null || fields.length() > 100) return out.put("reason", "Invalid DSP field schema");
+        double current = System.nanoTime() / 1e9;
+        for (Iterator<String> keys = fields.keys(); keys.hasNext();) {
+            String key = keys.next(); JSONObject field = fields.getJSONObject(key);
+            double fieldAge = current - field.optDouble("monotonic_s", -1);
+            boolean fresh = Double.isFinite(fieldAge) && fieldAge >= 0 && fieldAge <= DspLogDecoder.FRESH_SECONDS;
+            field.put("age_seconds", fieldAge).put("fresh", fresh);
+            t.remove(key);
+            if (fresh && !field.isNull("value")) t.put(key, field.get("value"));
+        }
         if (!"A2DP".equals(route.optString("transport")))
             return out.put("reason", "DSP observation does not match the media route");
         boolean match = false;
+        int a2dpContexts = 0;
         for (int i = 0; i < devices.length(); i++) {
             JSONObject d = devices.getJSONObject(i), c = d.optJSONObject("codec");
-            if (!"A2DP".equals(d.optString("transport")) || c == null)
+            if (!"A2DP".equals(d.optString("transport")))
                 continue;
+            a2dpContexts++;
+            if (c == null) continue;
             if (c.optInt("type", -1) != 7 && c.optInt("type", -1) != 12)
                 continue;
             JSONArray rates = c.optJSONArray("sample_rates_hz");
@@ -200,10 +221,31 @@ public class BtStatus {
                 rates.getInt(0) == t.optInt("sample_rate_hz", -1))
                 match = true;
         }
-        if (!match)
+        if (!match || a2dpContexts != 1)
             return out.put("reason", "DSP observation does not match the selected codec");
         t.put("available", true).put("age_seconds", age);
         return t;
+    }
+    static JSONObject selectionSnapshot() throws Exception {
+        JSONObject result = new JSONObject().put("collected_at_ms", System.currentTimeMillis())
+            .put("bluetooth_enabled", adapter != null && adapter.isEnabled());
+        JSONObject media;
+        try { media = route(); }
+        catch (Exception e) { error("media route", e); media = new JSONObject().put("transport", "Unknown"); }
+        JSONArray devices = new JSONArray();
+        for (int id : new int[] {BluetoothProfile.LE_AUDIO, BluetoothProfile.A2DP}) {
+            try {
+                JSONArray items = active(id);
+                for (int i = 0; i < items.length(); i++) devices.put(items.get(i));
+            } catch (Exception e) { error("active profile " + id, e); }
+        }
+        try {
+            ExtensionConfigStore store = new ExtensionConfigStore(DATA.resolve("config.conf"), LEGACY_DATA.resolve("config.conf"), AndroidConfigReader::read, 0);
+            result.put("tuning", new JSONObject(CodecTuning.describe(store.read())));
+        } catch (Exception error) {
+            result.put("tuning", new JSONObject().put("available", false).put("reason", "Configuration unavailable"));
+        }
+        return result.put("route", media).put("devices", devices);
     }
     static void finish() {
         if (finished)
@@ -212,27 +254,9 @@ public class BtStatus {
         JSONObject result = new JSONObject();
         String fallback = null;
         try {
-            result.put("schema", 1).put("collected_at_ms", System.currentTimeMillis());
-            result.put("bluetooth_enabled", adapter != null && adapter.isEnabled());
-            JSONObject r;
-            try {
-                r = route();
-            } catch (Exception e) {
-                error("media route", e);
-                r = new JSONObject().put("transport", "Unknown").put("source", "Unavailable");
-            }
-            result.put("route", r);
-            JSONArray devices = new JSONArray();
-            for (int id : new int[] {BluetoothProfile.LE_AUDIO, BluetoothProfile.A2DP}) {
-                try {
-                    JSONArray items = active(id);
-                    for (int i = 0; i < items.length(); i++)
-                        devices.put(items.get(i));
-                } catch (Exception e) {
-                    error("active profile " + id, e);
-                }
-            }
-            result.put("devices", devices);
+            result = selectionSnapshot().put("schema", 1);
+            JSONObject r = result.getJSONObject("route");
+            JSONArray devices = result.getJSONArray("devices");
             try {
                 result.put("dsp", telemetry(r, devices));
             } catch (Exception e) {

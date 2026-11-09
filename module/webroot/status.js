@@ -28,6 +28,47 @@ function execStatus() {
 function numbers(values, suffix) {
     return Array.isArray(values) && values.length ? values.map((n) => String(n) + suffix).join(" / ") : "Not reported";
 }
+function renderDsp(dsp, elapsed = 0) {
+    const age = Number(dsp.age_seconds) + elapsed;
+    const available = dsp.available && Number.isFinite(age) && age >= 0 && age <= 3;
+    byId("dsp-values").hidden = !available;
+    byId("dsp-details").hidden = !available;
+    text("dsp-note", available ? "Fresh DSP observation; receiver transmission remains unverified." : "Not observed. " + (dsp.reason || "No current diagnostic capture."));
+    if (!available) return;
+    const value = (key) => {
+        if (!dsp.fields) return dsp[key];
+        const field = dsp.fields[key];
+        return field && field.fresh && field.age_seconds + elapsed <= 3 ? field.value : null;
+    };
+    text("encoder", value("encoder_state") || "Not reported");
+    text("quality", String(value("quality_level") ?? "?") + " / " + String(value("qhs") ?? "?"));
+    const interval = value("packet_interval_ms"), ttp = value("calculated_ttp_us"), target = value("hq_target_word");
+    text("interval", interval == null ? "Not reported" : String(interval) + " ms");
+    text("dsp-mode", String(value("system_mode") ?? "?") + " / " + String(value("latency_state") ?? "?"));
+    text("dsp-ttp", ttp == null ? "Not reported" : String(ttp) + " µs · before final state term");
+    text("dsp-target", target == null ? "Not reported" : String(target) + " × 4 ms · calculation input");
+    const lossless = value("encoder_lossless");
+    text("dsp-lossless", lossless === true ? "Observed Lossless encoder state" : lossless === false ? "Observed other encoder state" : "Not observed");
+    const fields = {};
+    Object.entries(dsp.fields || {}).forEach(([key, field]) => { fields[key] = {...field, age_seconds: field.age_seconds + elapsed, fresh: field.fresh && field.age_seconds + elapsed <= 3}; });
+    text("dsp-fields", JSON.stringify(fields, null, 2));
+    text("age", age.toFixed(1) + " s");
+}
+function statusForCopy() {
+    const out = JSON.parse(JSON.stringify(lastStatus));
+    out.copied_at_ms = Date.now();
+    if (out.dsp && out.dsp.available) {
+        const elapsed = (performance.now() - receivedAt) / 1000;
+        out.dsp.age_seconds += elapsed;
+        out.dsp.available = out.dsp.age_seconds >= 0 && out.dsp.age_seconds <= 3;
+        Object.entries(out.dsp.fields || {}).forEach(([key, field]) => {
+            field.age_seconds += elapsed;
+            field.fresh = field.fresh && field.age_seconds <= 3;
+            if (!field.fresh) delete out.dsp[key];
+        });
+    }
+    return out;
+}
 function render(snapshot) {
     if (snapshot.error) throw new Error(snapshot.error);
     const route = snapshot.route || {};
@@ -46,15 +87,7 @@ function render(snapshot) {
     text("stream", device && typeof device.stream_started === "boolean" ? (device.stream_started ? "Set" : "Clear") : "Not reported");
     text("audio-mode", ({0: "Normal", 1: "Ringtone", 2: "In call", 3: "Communication", 4: "Call screening"})[route.audio_mode] || "Not reported");
     text("selection-note", codec && codec.lossless_selection === true && route.transport === "A2DP" ? "Lossless is selected in Android. Its 16-bit display does not describe the DSP PCM input or confirm lossless transmission." : "The Android selection is separate from the DSP input format and actual radio transmission.");
-    const dsp = snapshot.dsp || {};
-    byId("dsp-values").hidden = !dsp.available;
-    text("dsp-note", dsp.available ? "Fresh encoder observation; this is not a bit-perfect test." : "Not observed. " + (dsp.reason || "Diagnostics are not running."));
-    if (dsp.available) {
-        text("encoder", dsp.encoder_state || "Not reported");
-        text("quality", String(dsp.quality_level ?? "?") + " / " + String(dsp.qhs ?? "?"));
-        text("interval", dsp.packet_interval_ms == null ? "Not reported" : String(dsp.packet_interval_ms) + " ms");
-        text("age", Number(dsp.age_seconds).toFixed(1) + " s");
-    }
+    renderDsp(snapshot.dsp || {});
     text("message", snapshot.errors && snapshot.errors.length ? "Some status fields are unavailable on this build." : "Current media route and Android codec selection.");
     text("updated", "Updated " + new Date(snapshot.collected_at_ms).toLocaleTimeString() + " · Read-only; DSP logging stays off unless diagnostics were started separately.");
     lastStatus = snapshot;
@@ -73,7 +106,7 @@ async function refresh() {
 byId("refresh").addEventListener("click", refresh);
 byId("copy").addEventListener("click", async () => {
     if (!lastStatus) return;
-    const value = JSON.stringify(lastStatus, null, 2);
+    const value = JSON.stringify(statusForCopy(), null, 2);
     try {
         if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(value);
         else { const field = document.createElement("textarea"); field.value = value; field.setAttribute("aria-label", "Status to copy"); document.body.appendChild(field); field.select(); const ok = document.execCommand("copy"); field.remove(); if (!ok) throw new Error("Clipboard unavailable"); }
@@ -87,6 +120,6 @@ refresh();
 setInterval(() => {
     if (!lastStatus || !lastStatus.dsp || !lastStatus.dsp.available) return;
     const age = Number(lastStatus.dsp.age_seconds) + (performance.now() - receivedAt) / 1000;
-    if (age > 3) { byId("dsp-values").hidden = true; text("dsp-note", "The last DSP observation has expired. Refresh during a diagnostic capture."); }
-    else text("age", age.toFixed(1) + " s");
+    if (age > 3) { byId("dsp-values").hidden = true; byId("dsp-details").hidden = true; text("dsp-note", "The last DSP observation has expired. Refresh during a diagnostic capture."); }
+    else renderDsp(lastStatus.dsp, (performance.now() - receivedAt) / 1000);
 }, 500);

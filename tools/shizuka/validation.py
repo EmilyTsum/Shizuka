@@ -5,6 +5,9 @@ from .backends import get_backend
 from .project import offline_sources_fingerprint
 
 POLICY_CASES = (
+    ("dsp_decoder", "DspLogDecoderTest"),
+    ("codec_tuning", "CodecTuningTest"),
+    ("diagnostic_store", "DiagnosticStoreTest"),
     ("classic_qhs_policy", "ClassicQhsPolicyTest"),
     ("controller_features", "ControllerFeaturesTest"),
     ("system_preferences", "SystemPreferencesTest"),
@@ -13,6 +16,8 @@ POLICY_CASES = (
     ("profile_session", "ProfileSessionTest"),
 )
 PYTHON_CASES = (
+    ("dsp_capture_native", "dsp_capture_native_test.py"),
+    ("control_api", "control_api_test.py"),
     ("ttp_trial_guards", "ttp_trial_test.py"),
     ("apk_handoff", "apk_handoff_check.py"),
     ("apk_le_route", "apk_le_route_check.py"),

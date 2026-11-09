@@ -39,7 +39,7 @@ case "${1:-get}" in
   exec app_process /system/bin BtConfig "$CONFIG_FILE" "$LEGACY_CONFIG" watch;;
  start)
   start_policy_worker;;
- get|value|validate|set|migrate|device|help|--help)
+ get|value|validate|set|migrate|device|tuning|help|--help)
   exec app_process /system/bin BtConfig "$CONFIG_FILE" "$LEGACY_CONFIG" "$@";;
  *) echo 'usage: config.sh get|validate|set EXTENSION VALUE|migrate|device ADDRESS|active [get|transport|profile|optional-codecs]|controller-features|start|stop' >&2;exit 1;;
 esac

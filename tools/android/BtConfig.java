@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 /** CLI boundary: extension files and Android device settings have separate ownership. */
 public final class BtConfig {
-    static final String USAGE = "config.sh get|validate|value KEY|set KEY VALUE|migrate|" + DevicePreferences.USAGE;
+    static final String USAGE = "config.sh get|validate|value KEY|set KEY VALUE|migrate|tuning capabilities|get|set KEY VALUE|plan PROFILE CODEC MODE RATE BITS|" + DevicePreferences.USAGE;
     public static void main(String[] args) {
         try { run(args); }
         catch (Exception e) {
@@ -29,10 +29,32 @@ public final class BtConfig {
             return;
         }
         ExtensionConfigStore store = new ExtensionConfigStore(Paths.get(args[0]), Paths.get(args[1]), AndroidConfigReader::read, 0);
+        if ("tuning".equals(action)) {
+            if (args.length < 4) throw new IllegalArgumentException("tuning capabilities|get|set KEY VALUE|plan PROFILE CODEC MODE RATE BITS");
+            switch (args[3]) {
+            case "capabilities": requireCount(args, 4); System.out.println(ControlJson.encode(CodecTuning.capabilities())); return;
+            case "get": requireCount(args, 4); System.out.println(ControlJson.encode(CodecTuning.describe(store.read()))); return;
+            case "set":
+                requireCount(args, 6);
+                String key = CodecTuning.key(args[4]), value = CodecTuning.value(args[5]);
+                store.update(config -> config.with(key, value));
+                java.util.Map<String, Object> saved = CodecTuning.describe(store.read());
+                saved.put("accepted_change", ControlJson.object("key", key, "value", Integer.parseInt(value)));
+                saved.put("saved", true);
+                System.out.println(ControlJson.encode(saved)); return;
+            case "plan":
+                requireCount(args, 9);
+                System.out.println(ControlJson.encode(CodecTuning.plan(store.read(), args[4], args[5], args[6], Integer.parseInt(args[7]), Integer.parseInt(args[8])))); return;
+            default: throw new IllegalArgumentException("Unknown tuning action");
+            }
+        }
         if ("set".equals(action)) {
             requireCount(args, 5);
             ExtensionConfig.defaults().with(args[3], args[4]); // Validate before creating lock/state.
             store.update(config -> config.with(args[3], args[4]));
+            if (CodecTuning.KEY.equals(args[3])) {
+                System.out.println(ControlJson.encode(CodecTuning.describe(store.read()))); return;
+            }
             System.out.println("extension saved; apply native changes with rollback followed by KernelSU Action");
             return;
         }

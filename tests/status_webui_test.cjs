@@ -44,9 +44,23 @@ render('Other', [a2dp, le]);
 assert.equal(element('codec').textContent, 'Not reported');
 render('A2DP', [a2dp], {available: true, age_seconds: 1, encoder_state: 'ENCLEVEL_4'});
 assert.equal(element('dsp-values').hidden, false);
+render('A2DP', [a2dp], {available: true, age_seconds: 0, fields: {
+    encoder_lossless: {value: true, age_seconds: 2.5, fresh: true},
+    calculated_ttp_us: {value: 237000, age_seconds: 0, fresh: true},
+    hq_target_word: {value: 70, age_seconds: 0, fresh: true},
+}});
+assert.match(element('dsp-lossless').textContent, /Observed Lossless/);
+assert.match(element('dsp-ttp').textContent, /237000/);
+clock = 1000;
+intervals[1]();
+assert.equal(element('dsp-lossless').textContent, 'Not observed');
+const copied = vm.runInContext('statusForCopy()', sandbox);
+assert.equal(copied.dsp.fields.encoder_lossless.fresh, false);
+assert.equal(copied.dsp.age_seconds, 1);
 clock = 4000;
 intervals[1]();
 assert.equal(element('dsp-values').hidden, true);
+assert.equal(vm.runInContext('statusForCopy()', sandbox).dsp.available, false);
 (async () => {
     sandbox.document.hidden = false;
     await vm.runInContext('refresh()', sandbox);

@@ -26,5 +26,7 @@ button:disabled { opacity: .5; } button:focus-visible, input:focus-visible { out
 input { width: 18px; height: 18px; accent-color: var(--accent); }
 .footer { font-size: 11px; color: var(--muted); }
 [hidden] { display: none !important; }
+details { margin-top: 12px; font-size: 12px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
 @media (prefers-color-scheme: dark) { :root { --bg: #101914; --panel: #18251e; --text: #e3eee7; --muted: #a4b5aa; --border: #2b3e31; --accent: #8bd3ad; --soft: #263d2f; } button:not(.secondary) { color: #102b1c; } }
 @media (max-width: 350px) { main { padding-left: 12px; padding-right: 12px; } h1 { font-size: 22px; } .card { padding: 16px; } }
