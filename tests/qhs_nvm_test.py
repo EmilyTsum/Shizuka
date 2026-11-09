@@ -1,6 +1,11 @@
 """Offline ownership and exact-byte tests; no mount or phone access."""
 
-import hashlib, os, pathlib, subprocess, tempfile, unittest
+import hashlib
+import os
+import pathlib
+import subprocess
+import tempfile
+import unittest
 
 P = pathlib.Path(__file__).resolve().parents[1]
 
@@ -10,7 +15,10 @@ class Nvm(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.d = pathlib.Path(self.tmp.name)
         self.functions = (
-            (P / "module/qhs-nvm.sh").read_text().split("# Sourceable function definitions")[0].split("bad() {", 1)[1]
+            (P / "module/qhs-nvm.sh")
+            .read_text()
+            .split("# Sourceable function definitions")[0]
+            .split("bad() {", 1)[1]
         )
         self.functions = "bad() {" + self.functions
         self.bb = self.d / "bb"
@@ -87,7 +95,14 @@ owned
             )
         ]
         r = subprocess.run(
-            ["sh", "-c", f'. "{P / "module/lib/config.sh"}"\nCONFIG_FILE="{self.d}/missing"; LEGACY_CONFIG="{self.d}/also-missing"\n' + block + '\n[ "$qhs_enabled" = false ]'], capture_output=True
+            [
+                "sh",
+                "-c",
+                f'. "{P / "module/lib/config.sh"}"\nCONFIG_FILE="{self.d}/missing"; LEGACY_CONFIG="{self.d}/also-missing"\n'
+                + block
+                + '\n[ "$qhs_enabled" = false ]',
+            ],
+            capture_output=True,
         )
         self.assertEqual(r.returncode, 0, r.stderr.decode())
 
@@ -109,6 +124,8 @@ owned
         source = (P / "module/control.sh").read_text()
         functions = (
             f'. "{P / "module/lib/runtime.sh"}"\n'
+            # This test isolates NVM cleanup; policy stop/locking has its own process harness.
+            + "lock_policy() { :; }\nstop_policy() { :; }\n"
             + source[source.index("qhs_features()") : source.index('case "${1:-status}"')]
         )
         script = (
@@ -144,6 +161,7 @@ owned
         source = (P / "module/control.sh").read_text()
         functions = (
             f'. "{P / "module/lib/runtime.sh"}"\n'
+            + "lock_policy() { :; }\nstop_policy() { :; }\n"
             + source[source.index("qhs_features()") : source.index('case "${1:-status}"')]
         )
         trapline = [
@@ -198,29 +216,59 @@ case remove in remove)
     def shell_entry_case(self, initial, args):
         # Execute each actual entry guard through a fake fixed BusyBox that
         # emulates /proc executable readlink and records exec transitions.
-        for name in ['control.sh','qhs-nvm.sh']:
+        for name in ["control.sh", "qhs-nvm.sh"]:
             with tempfile.TemporaryDirectory() as td:
-                d=pathlib.Path(td);mode=d/'mode';mode.write_text(initial);calls=d/'exec.calls'
-                bb=d/'busybox';bb.write_text("#!/usr/bin/env python3\nimport sys,os,pathlib\np=pathlib.Path(__file__).parent;m=p/'mode';a=sys.argv[1:]\nif a[:2]==['readlink','-f']:\n if a[2]==str(p/'busybox'): print(str(p/'busybox'))\n elif m.read_text()=='unknown': print('')\n else: print(str(p/'busybox') if m.read_text()=='ash' else '/system/bin/mksh')\nelif a[0]=='sh':\n with (p/'exec.calls').open('a') as f:f.write('exec\\n')\n m.write_text('ash');os.execv('/bin/sh',['sh']+a[1:])\nelse:sys.exit(90)\n");bb.chmod(0o755)
-                src=(P/'module'/name).read_text();start=src.index('# Android mksh');guard=src[start:src.index('\nfi\n',start)+4]
-                entry=d/'entry.sh';entry.write_text(f'BB="{bb}"\n'+guard+"\nprintf '%s\\0' \"$@\"\n")
-                env=dict(os.environ, QHS_ALREADY_REEXEC='1', shell_exe=str(bb), bb_exe=str(bb))
-                r=subprocess.run(['sh',str(entry)]+args,capture_output=True,env=env,timeout=3)
-                yield name,r,calls.read_text() if calls.exists() else ''
+                d = pathlib.Path(td)
+                mode = d / "mode"
+                mode.write_text(initial)
+                calls = d / "exec.calls"
+                bb = d / "busybox"
+                bb.write_text(
+                    "#!/usr/bin/env python3\nimport sys,os,pathlib\np=pathlib.Path(__file__).parent;m=p/'mode';a=sys.argv[1:]\nif a[:2]==['readlink','-f']:\n if a[2]==str(p/'busybox'): print(str(p/'busybox'))\n elif m.read_text()=='unknown': print('')\n else: print(str(p/'busybox') if m.read_text()=='ash' else '/system/bin/mksh')\nelif a[0]=='sh':\n with (p/'exec.calls').open('a') as f:f.write('exec\\n')\n m.write_text('ash');os.execv('/bin/sh',['sh']+a[1:])\nelse:sys.exit(90)\n"
+                )
+                bb.chmod(0o755)
+                src = (P / "module" / name).read_text()
+                if name == "control.sh":
+                    self.assertIn('ensure_busybox_shell "$@"', src)
+                    runtime = (P / "module/lib/runtime.sh").read_text()
+                    guard = runtime[
+                        runtime.index("ensure_busybox_shell() {") : runtime.index("\nsha()")
+                    ]
+                    guard += '\nensure_busybox_shell "$@"\n'
+                else:
+                    start = src.index("# Android mksh")
+                    guard = src[start : src.index("\nfi\n", start) + 4]
+                entry = d / "entry.sh"
+                entry.write_text(
+                    f'BB="{bb}"\nfail() {{ echo "$*" >&2;exit 1; }}\n'
+                    + guard
+                    + "\nprintf '%s\\0' \"$@\"\n"
+                )
+                env = dict(os.environ, QHS_ALREADY_REEXEC="1", shell_exe=str(bb), bb_exe=str(bb))
+                r = subprocess.run(
+                    ["sh", str(entry)] + args, capture_output=True, env=env, timeout=3
+                )
+                yield name, r, calls.read_text() if calls.exists() else ""
+
     def test_mksh_entry_reexec_preserves_hostile_argv(self):
-        args=['rollback','space arg','$(touch sentinel)','--flag','']
-        for name,r,calls in self.shell_entry_case('mksh',args):
-            self.assertEqual(r.returncode,0,(name,r.stderr))
-            self.assertEqual(r.stdout,b''.join(a.encode()+b'\0' for a in args))
-            self.assertEqual(calls,'exec\n')
+        args = ["rollback", "space arg", "$(touch sentinel)", "--flag", ""]
+        for name, r, calls in self.shell_entry_case("mksh", args):
+            self.assertEqual(r.returncode, 0, (name, r.stderr))
+            self.assertEqual(r.stdout, b"".join(a.encode() + b"\0" for a in args))
+            self.assertEqual(calls, "exec\n")
+
     def test_ash_entry_no_reexec_loop(self):
-        for name,r,calls in self.shell_entry_case('ash',['pending']):
-            self.assertEqual(r.returncode,0,(name,r.stderr));self.assertEqual(calls,'')
-            self.assertEqual(r.stdout,b'pending\0')
+        for name, r, calls in self.shell_entry_case("ash", ["pending"]):
+            self.assertEqual(r.returncode, 0, (name, r.stderr))
+            self.assertEqual(calls, "")
+            self.assertEqual(r.stdout, b"pending\0")
+
     def test_unknown_shell_identity_fails_before_reexec(self):
-        for name,r,calls in self.shell_entry_case('unknown',['apply']):
-            self.assertNotEqual(r.returncode,0,name);self.assertEqual(calls,'')
-            self.assertIn(b'Cannot identify shell executable',r.stderr)
+        for name, r, calls in self.shell_entry_case("unknown", ["apply"]):
+            self.assertNotEqual(r.returncode, 0, name)
+            self.assertEqual(calls, "")
+            self.assertIn(b"cannot identify shell executable", r.stderr.lower())
+
     def test_syntax(self):
         for n in ["control.sh", "qhs-nvm.sh"]:
             subprocess.run(["sh", "-n", str(P / "module" / n)], check=True)

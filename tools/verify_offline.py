@@ -94,12 +94,12 @@ def main():
     for name, filename in PYTHON_CASES:
         run = subprocess.run(
             [sys.executable, str(ROOT / "tests" / filename)],
-            check=True,
             capture_output=True,
             text=True,
         )
         output = (run.stdout + run.stderr).strip()
-        print(output)
+        print(output, flush=True)
+        run.check_returncode()
         results.append({"test": name, "passed": True, "output": output})
     if fingerprint != offline_sources_fingerprint():
         raise ValueError("Sources changed during verification; rerun the checks")

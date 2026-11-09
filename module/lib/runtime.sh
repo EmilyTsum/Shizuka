@@ -1,5 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Shared by the installed lifecycle scripts; callers set MODDIR, STATE and BB.
+ensure_busybox_shell() {
+ # mksh may close numeric FDs on exec; KernelSU ash must own every flock.
+ [ -x "$BB" ] || fail 'KernelSU busybox unavailable'
+ bb_exe=$("$BB" readlink -f "$BB")
+ shell_exe=$("$BB" readlink -f "/proc/$$/exe")
+ [ -n "$bb_exe" ] && [ -n "$shell_exe" ] || fail 'cannot identify shell executable'
+ if [ "$shell_exe" != "$bb_exe" ];then exec "$BB" sh "$0" "$@";fi
+}
 sha() { value=$("$BB" sha256sum "$1"); echo "${value%% *}"; }
 nsrun() { target_pid=$1; shift; "$BB" nsenter -t "$target_pid" -m -- "$@"; }
 host_zygote() { /system/bin/ps -A -o PID,PPID,NAME | "$BB" awk '$2==1 && $3=="zygote64" {print $1}'; }
@@ -45,13 +53,16 @@ recovery_pending() {
  [ -f "$STATE/active" ] || [ -f "$STATE/armed" ] || [ -s "$STATE/mounts.tsv" ] || qhs_pending
 }
 
-lock_lifecycle() {
+prepare_state() {
  [ ! -L "$STATE" ] || fail 'unsafe state symlink'
  if [ -d "$STATE" ]; then
   [ "$("$BB" stat -c '%u' "$STATE")" = 0 ] || fail 'unsafe state owner'
  fi
  (umask 077; mkdir -p "$STATE") || fail 'cannot create state directory'
  chmod 0700 "$STATE" || fail 'cannot protect state directory'
+}
+lock_lifecycle() {
+ prepare_state
  [ ! -L "$STATE/lifecycle.lock" ] || fail 'unsafe lifecycle lock'
  exec 9> "$STATE/lifecycle.lock"
  "$BB" flock 9 || fail 'cannot lock module lifecycle'

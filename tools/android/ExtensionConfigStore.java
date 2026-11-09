@@ -1,48 +1,72 @@
 // SPDX-License-Identifier: GPL-2.0-only
-import android.system.*;
-import java.io.*;
+import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Set;
+import java.util.function.UnaryOperator;
 
-/** Bounded, no-follow reads; writes create only the canonical extension configuration. */
+/** Serialize read/modify/replace across threads and CLI processes; reads create no files. */
 final class ExtensionConfigStore {
+    interface Reader {
+        ExtensionConfig read(Path path) throws Exception;
+    }
+    private static final Set<PosixFilePermission> DIRECTORY_MODE = PosixFilePermissions.fromString("rwx------");
+    private static final Set<PosixFilePermission> FILE_MODE = PosixFilePermissions.fromString("rw-------");
     private final Path canonical, legacy;
-    ExtensionConfigStore(Path canonical, Path legacy) { this.canonical = canonical; this.legacy = legacy; }
+    private final Reader reader;
+    private final int ownerUid;
+
+    ExtensionConfigStore(Path canonical, Path legacy, Reader reader, int ownerUid) {
+        this.canonical = canonical.toAbsolutePath().normalize();
+        this.legacy = legacy.toAbsolutePath().normalize();
+        this.reader = reader;
+        this.ownerUid = ownerUid;
+    }
+
     ExtensionConfig read() throws Exception {
         Path path = Files.exists(canonical, LinkOption.NOFOLLOW_LINKS) ? canonical : legacy;
         if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return ExtensionConfig.defaults();
-        FileDescriptor fd = Os.open(path.toString(), OsConstants.O_RDONLY | OsConstants.O_CLOEXEC |
-                                   OsConstants.O_NOFOLLOW | OsConstants.O_NONBLOCK, 0);
-        FileInputStream input = null;
-        try {
-            StructStat before = Os.fstat(fd);
-            if ((before.st_mode & OsConstants.S_IFMT) != OsConstants.S_IFREG || before.st_size > 8192)
-                throw new IllegalArgumentException("config is not a bounded regular file");
-            input = new FileInputStream(fd);
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-            byte[] buffer = new byte[1024];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                if (bytes.size() + count > 8192) throw new IllegalArgumentException("config too large");
-                bytes.write(buffer, 0, count);
+        return reader.read(path);
+    }
+
+    void update(UnaryOperator<ExtensionConfig> change) throws Exception {
+        // FileLock handles other processes; the monitor handles overlapping locks in this JVM.
+        synchronized (ExtensionConfigStore.class) {
+            Path parent = canonical.getParent();
+            Files.createDirectories(parent, PosixFilePermissions.asFileAttribute(DIRECTORY_MODE));
+            requirePrivate(parent, true);
+            Path lock = parent.resolve(".config.lock");
+            try {
+                Files.createFile(lock, PosixFilePermissions.asFileAttribute(FILE_MODE));
+            } catch (FileAlreadyExistsException exists) {
+                // Keep this inode: replacing/unlinking it would split the lock between writers.
             }
-            StructStat after = Os.fstat(fd);
-            boolean trusted = android.os.Process.myUid() == 0 &&
-                ClassicQhsPolicy.secureConfig(before.st_uid, before.st_mode) &&
-                ClassicQhsPolicy.secureConfig(after.st_uid, after.st_mode) &&
-                before.st_dev == after.st_dev && before.st_ino == after.st_ino;
-            return ExtensionConfig.parse(new String(bytes.toByteArray(), StandardCharsets.UTF_8), trusted);
-        } finally {
-            if (input != null) input.close(); else Os.close(fd);
+            requirePrivate(lock, false);
+            try (FileChannel channel = FileChannel.open(lock, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+                 FileLock ignored = channel.lock()) {
+                write(change.apply(read()));
+            }
         }
     }
-    void write(ExtensionConfig config) throws Exception {
+
+    private void requirePrivate(Path path, boolean directory) throws IOException {
+        BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        Set<PosixFilePermission> permissions = directory ? DIRECTORY_MODE : FILE_MODE;
+        int uid = ((Number)Files.getAttribute(path, "unix:uid", LinkOption.NOFOLLOW_LINKS)).intValue();
+        if (uid != ownerUid || !(directory ? attributes.isDirectory() : attributes.isRegularFile()) ||
+            !Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS).equals(permissions))
+            throw new IOException("unsafe configuration " + (directory ? "directory (requires mode 0700): " : "lock (requires mode 0600): ") + path);
+    }
+
+    private void write(ExtensionConfig config) throws Exception {
         Path parent = canonical.getParent();
-        Files.createDirectories(parent, PosixFilePermissions.asFileAttribute(
-            PosixFilePermissions.fromString("rwx------")));
         Path temporary = Files.createTempFile(parent, ".config-", ".tmp",
-            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+            PosixFilePermissions.asFileAttribute(FILE_MODE));
         try {
             Files.write(temporary, config.serialize().getBytes(StandardCharsets.UTF_8));
             Files.move(temporary, canonical, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);

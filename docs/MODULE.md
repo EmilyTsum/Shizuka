@@ -12,13 +12,16 @@ The module retains the exact DZIF stock and payload hash checks, late runtime mo
 | `lib/runtime.sh` | Shared host-process discovery, process identity, live payload checks, tokens, and lifecycle locking. |
 | `lib/properties.sh` | Generic property snapshots, write ownership and restoration rules. |
 | `lib/config.sh` | Optional extension configuration and legacy-location lookup. |
+| `lib/policy.sh` | Serialized QHS worker start/stop, ownership, readiness and bounded termination. |
 | `lib/device.sh`, `profiles/` | Validated bundled backend selection and device-specific operations. |
 
 ## Serialized recovery
 
 Mutating control commands hold `state/lifecycle.lock` on FD 9. Activation, keeping a session, and recovery cannot modify mounts, properties, or recovery markers concurrently. Status and preflight remain read-only. Recovery waits for an in-progress mutation to finish; it does not interrupt activation halfway through a mount operation.
 
-Detached watchdog, health, and policy workers close FD 9 before starting. Otherwise a worker could retain the lifecycle lock after its parent returns. The existing rollback lock on FD 7 and QHS ownership lock on FD 8 remain in place.
+Policy start/stop commands also acquire the lifecycle lock before `state/policy.lock` on FD 6. Recovery and keeping a session call the shared worker functions under their existing lifecycle lock, avoiding recursive lock acquisition in a child. Manual startup waits for recovery to finish and then rechecks whether the module remains active. All flock-owning entry points run under KernelSU BusyBox ash.
+
+Detached watchdog and health workers close FD 9; the policy worker closes both FD 6 and FD 9. Otherwise a worker could retain a lock after its parent returns. The existing rollback lock on FD 7 and QHS ownership lock on FD 8 remain in place.
 
 Workers call `rollback-trial TOKEN` or `rollback-health TOKEN`. The controller checks the token after acquiring the lifecycle lock. A delayed request from an old generation cannot restore stock over a newer session, and a disarmed trial cannot undo a kept session. Only a current health recovery sets `.no-auto`. Manual `control.sh rollback` remains unconditional.
 
@@ -26,7 +29,7 @@ New activations save both PID and `/proc/PID/stat` start time for Bluetooth and 
 
 Active/trial markers, a nonempty mount journal, and pending QHS restoration all count as recovery state. Action and boot activation restore this state before starting another generation. Direct activation refuses to overwrite it, including when an interrupted recovery has already removed the active/trial markers. The read-only `control.sh status` reports pending recovery instead of declaring that state inactive.
 
-The health watcher starts before the trial is disarmed. If reading the process identity or preparing the watcher fails, the rollback arm remains present.
+Health and policy preparation both succeed before the trial is disarmed. Policy startup is idempotent, replaces PID-only legacy watchers, and waits for the new worker to acknowledge its recorded identity and become ready. Stop confirms termination before allowing a replacement. Failures propagate to the keep/recovery command, preserving the trial arm and recovery records. A matching command with a different process identity is left untouched and reported for inspection.
 
 ## Property snapshots
 
@@ -42,9 +45,10 @@ SHIZUKA_TEST_SHELL=bash python3 tests/module_lifecycle_test.py
 # Optional host BusyBox, not the phone's ARM64 binary:
 SHIZUKA_TEST_BUSYBOX=/path/to/busybox SHIZUKA_TEST_SHELL='/path/to/busybox sh' python3 tests/module_lifecycle_test.py
 python3 tests/qhs_nvm_test.py
+python3 tests/policy_lifecycle_test.py
 node tests/status_webui_test.cjs
 ```
 
-The lifecycle harness uses temporary state and property databases, real host file locks through Python's POSIX `fcntl` module, and fake Android boundaries. It covers queued stale recovery, detached-worker descriptors, PID reuse, live payload mismatches, recovery failure, and exact property restoration. A real numeric `/proc` identity check is skipped on hosts that do not expose that record; synthetic process-record checks still run. The optional host BusyBox supplies its shell and other applets; the harness supplies file locking even when that BusyBox build omits `flock`.
+The lifecycle harness uses temporary state and property databases, real host file locks through Python's POSIX `fcntl` module, and fake Android boundaries. It covers queued stale recovery, detached-worker descriptors, PID reuse, live payload mismatches, recovery failure, and exact property restoration. The policy harness additionally runs real child processes to exercise concurrent start/stop, readiness failures and recovery interleaving. A real numeric `/proc` identity check is skipped on hosts that do not expose that record; synthetic process-record checks still run. The optional host BusyBox supplies its shell and other applets; the harness supplies file locking even when that BusyBox build omits `flock`.
 
 `tools/verify_offline.py` records the lifecycle suite with the existing native, Java, and QHS checks. `tools/package.py` requires both that host evidence and a current build-bound native integration result from full verification. Host-only checks cannot create the integration result; see [PORTING.md](PORTING.md).

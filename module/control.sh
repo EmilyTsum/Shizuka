@@ -7,20 +7,13 @@ BB=/data/adb/ksu/bin/busybox
 log() { echo "s25_aptx_adaptive: $*"; }
 fail() { log "$*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail 'root required'
-# Android mksh can mark numeric shell FDs close-on-exec; run every flock
-# under the fixed KernelSU ash binary. Inspect executable identity, not an
-# inherited environment flag, so ordinary `sh control.sh` is safe too.
-bb_exe=$("$BB" readlink -f "$BB")
-shell_exe=$("$BB" readlink -f "/proc/$$/exe")
-[ -n "$bb_exe" ] && [ -n "$shell_exe" ] || { echo 'Cannot identify shell executable' >&2;exit 1; }
-if [ "$shell_exe" != "$bb_exe" ];then
- exec "$BB" sh "$0" "$@"
-fi
+. "$MODDIR/lib/runtime.sh"
+ensure_busybox_shell "$@"
 STATE="$MODDIR/state"
 . "$MODDIR/lib/device.sh"
-. "$MODDIR/lib/runtime.sh"
 . "$MODDIR/lib/properties.sh"
 . "$MODDIR/lib/config.sh"
+. "$MODDIR/lib/policy.sh"
 # Serialize activation, commit and recovery, including watchdog requests.
 case "${1:-}" in
  activate|commit|keep-verified|rollback|rollback-trial|rollback-health) lock_lifecycle;;
@@ -59,12 +52,16 @@ start_health() {
  "$BB" setsid "$BB" sh "$MODDIR/health.sh" "$MODDIR" "$watched" "$started" "$health_token" 9>&- > "$STATE/health.log" 2>&1 < /dev/null &
  echo $! > "$STATE/health.pid"
 }
-start_policy() {
- if [ "$(extension_value classic_qhs_host_aware)" = true ];then
-  "$BB" sh "$MODDIR/config.sh" start 9>&- || log "policy watcher did not start"
- else
-  "$BB" sh "$MODDIR/config.sh" stop 9>&- || log "policy watcher did not stop"
- fi
+start_policy() (
+ # The caller already holds the lifecycle lock; do not reacquire it in a child.
+ lock_policy
+ start_policy_worker
+)
+keep_session() {
+ verify_active_payloads || return 1
+ start_health || return 1
+ start_policy || return 1
+ rm -f "$STATE/armed"
 }
 allowed() { profile_target_allowed "$1"; }
 
@@ -114,7 +111,7 @@ rollback() (
    ;;
  esac
  if ! recovery_pending;then check_inputs;log 'already inactive; stock hashes match';return;fi
- if [ -f "$MODDIR/config.sh" ];then "$BB" sh "$MODDIR/config.sh" stop || true;fi
+ (lock_policy;stop_policy) || return 1
  rm -f "$STATE/health-token"
  qhs_restoring=0
  if qhs_pending;then
@@ -282,13 +279,13 @@ case "${1:-status}" in
   [ -f "$STATE/active" ] || fail 'not active'
   [ -f "$MODDIR/proofs/verified-payloads.sha256" ] || fail 'heard/verified payload proof missing'
   "$BB" cmp -s "$MODDIR/payloads.sha256" "$MODDIR/proofs/verified-payloads.sha256" || fail 'unverified payload generation'
-  verify_active_payloads
-  start_health;rm -f "$STATE/armed";start_policy;log 'kept exact tested payload; see proofs/audio-verification.json for audio evidence scope';;
+  keep_session
+  log 'kept exact tested payload; see proofs/audio-verification.json for audio evidence scope';;
  commit)
   [ -f "$STATE/active" ] || fail 'not active'
   [ -f "$STATE/hci-and-audio-verified" ] || fail 'HCI and audio success have not been verified'
-  verify_active_payloads
-  start_health;rm -f "$STATE/armed";start_policy;log 'kept current experimental process; automatic boot activation stays disabled';;
+  keep_session
+  log 'kept current experimental process; automatic boot activation stays disabled';;
  rollback) rollback;;
  rollback-trial|rollback-health)
   [ "$#" = 2 ] || fail 'watcher recovery requires a generation token'

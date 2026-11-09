@@ -220,6 +220,7 @@ class Profiles(unittest.TestCase):
         bundle = self.d / "android-tools"
         self.assertTrue((bundle / "policy.dex").is_file())
         self.assertTrue((bundle / "lib/runtime.sh").is_file())
+        self.assertTrue((bundle / "lib/policy.sh").is_file())
         self.assertFalse((bundle / "device-profile").exists())
         self.assertFalse((self.d / "android-build.json").exists())
         self.assertEqual(

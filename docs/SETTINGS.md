@@ -40,7 +40,11 @@ aptx_hd_priority=system
 
 `system` leaves the property untouched. Voice accepts `true`/`false` as explicit overrides; priorities accept decimal values from 0 to 999999. These are technical properties, not a per-device codec cache. The backend still supplies properties/defaults needed to expose its added codecs. Normal btsnoop logging follows Android and is no longer enabled automatically.
 
-`config.sh set KEY VALUE` saves only extension keys, using a temporary file and atomic rename with mode 0600. QHS true is effective only for a trusted root-owned, non-writable-by-others regular file. Controller reads/requests also require a supported backend; portable tools do not enable them. Reactivate the native module after changing runtime extensions.
+`config.sh set KEY VALUE` saves only extension keys, using a temporary file and atomic rename with mode 0600. Concurrent saves and migration share a stable `.config.lock`: each writer locks, rereads the latest configuration, changes its own key and replaces the canonical file. An in-process monitor also serializes Java threads. Reading creates neither a directory nor a lock. The configuration directory must be owned by root with mode 0700, and the lock must be a root-owned regular file with mode 0600; symlinks are rejected.
+
+QHS true is effective only for a trusted root-owned, non-writable-by-others regular file. Controller reads/requests also require a supported backend; portable tools do not enable them. After changing runtime extensions, run `control.sh rollback` and then KernelSU Action to apply a fresh native session. Action on an already active trial does not replace its properties or controller setup.
+
+`config.sh start` and `stop` share the activation/recovery lock and a policy lock. Startup waits for the worker's PID/start-time record and readiness message; stopping waits for that exact process to exit before clearing its records. A failed or mismatched worker identity retains recovery state. The readiness message confirms the watcher is running, not that a controller command or lossless transmission succeeded.
 
 ## Existing configurations
 

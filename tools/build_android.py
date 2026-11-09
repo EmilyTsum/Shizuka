@@ -186,7 +186,7 @@ def main():
         bundle = BUILD / "android-tools"
         shutil.rmtree(bundle, ignore_errors=True)
         (bundle / "lib").mkdir(parents=True)
-        for path in ["config.sh", "status.sh", "lib/config.sh", "lib/runtime.sh"]:
+        for path in ["config.sh", "status.sh", "lib/config.sh", "lib/runtime.sh", "lib/policy.sh"]:
             shutil.copy2(ROOT / "module" / path, bundle / path)
         shutil.copy2(BUILD / "policy-dex/classes.dex", bundle / "policy.dex")
         shutil.copy2(BUILD / "status-dex/classes.dex", bundle / "status.dex")

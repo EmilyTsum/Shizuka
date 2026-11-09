@@ -9,12 +9,14 @@ POLICY_CASES = (
     ("controller_features", "ControllerFeaturesTest"),
     ("system_preferences", "SystemPreferencesTest"),
     ("codec_presentation", "CodecPresentationTest"),
+    ("extension_store", "ExtensionConfigStoreTest"),
 )
 PYTHON_CASES = (
     ("qhs_nvm", "qhs_nvm_test.py"),
     ("module_lifecycle", "module_lifecycle_test.py"),
     ("device_profiles", "device_profiles_test.py"),
     ("build_pipeline", "build_pipeline_test.py"),
+    ("policy_lifecycle", "policy_lifecycle_test.py"),
 )
 
 

@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 /** CLI boundary: extension files and Android device settings have separate ownership. */
 public final class BtConfig {
-    static final String USAGE = "config.sh get|validate|value KEY|set KEY VALUE|migrate|" + DevicePreferences.USAGE + "|watch";
+    static final String USAGE = "config.sh get|validate|value KEY|set KEY VALUE|migrate|" + DevicePreferences.USAGE;
     public static void main(String[] args) {
         try { run(args); }
         catch (Exception e) {
@@ -28,7 +28,20 @@ public final class BtConfig {
             SystemBluetoothSettings.run(BluetoothRuntime.connect(), address, command);
             return;
         }
-        ExtensionConfigStore store = new ExtensionConfigStore(Paths.get(args[0]), Paths.get(args[1]));
+        ExtensionConfigStore store = new ExtensionConfigStore(Paths.get(args[0]), Paths.get(args[1]), AndroidConfigReader::read, 0);
+        if ("set".equals(action)) {
+            requireCount(args, 5);
+            ExtensionConfig.defaults().with(args[3], args[4]); // Validate before creating lock/state.
+            store.update(config -> config.with(args[3], args[4]));
+            System.out.println("extension saved; apply native changes with rollback followed by KernelSU Action");
+            return;
+        }
+        if ("migrate".equals(action)) {
+            requireCount(args, 3);
+            store.update(ExtensionConfig::forMigration);
+            System.out.println("minimal extension configuration saved; Android device preferences unchanged");
+            return;
+        }
         ExtensionConfig config = store.read();
         switch (action) {
         case "get":
@@ -42,12 +55,6 @@ public final class BtConfig {
             requireCount(args, 4);
             System.out.println("classic_qhs_host_aware".equals(args[3]) ? Boolean.toString(config.qhsEnabled()) : config.value(args[3]));
             return;
-        case "set":
-            requireCount(args, 5); store.write(config.with(args[3], args[4]));
-            System.out.println("extension saved; reactivate to change runtime properties or QHS"); return;
-        case "migrate":
-            requireCount(args, 3); store.write(config.forMigration());
-            System.out.println("minimal extension configuration saved; Android device preferences unchanged"); return;
         case "watch":
             requireCount(args, 3);
             if (!config.qhsEnabled()) { System.out.println("extension_watch=disabled"); return; }

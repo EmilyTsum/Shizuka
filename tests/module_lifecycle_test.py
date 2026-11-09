@@ -52,6 +52,7 @@ else:
             "set -eu\n"
             f'MODDIR={shlex.quote(str(self.d))}; STATE="$MODDIR/state"; BB="$MODDIR/bb"\n'
             f". {shlex.quote(str(ROOT / 'module/lib/runtime.sh'))}\n"
+            f". {shlex.quote(str(ROOT / 'module/lib/policy.sh'))}\n"
             f". {shlex.quote(str(ROOT / 'module/profiles/samsung-sm-s931z-dzif.sh'))}\n"
             'fail() { echo "$*" >&2; exit 1; }\n'
         )
@@ -372,6 +373,17 @@ nsrun() { "$BB" sha256sum "$MODDIR/live/$1/${4##*/}"; }
         self.assertTrue((self.state / "armed").exists())
         self.assertFalse((self.d / ".no-auto").exists())
 
+    def test_recovery_preserves_state_when_policy_cannot_be_stopped(self):
+        self.recovery_fixture()
+        self.run_shell(
+            RECOVERY + "\nstop_policy() { return 29; }\nlock_lifecycle\nrollback trial new",
+            ok=False,
+        )
+        self.assertTrue((self.state / "armed").exists())
+        self.assertTrue((self.state / "health-token").exists())
+        self.assertTrue((self.state / "qhs-nvm/intent").exists())
+        self.assertFalse((self.d / "recovery-attempted").exists())
+
     def test_current_health_recovery_disables_auto_entry(self):
         self.recovery_fixture()
         self.run_shell(RECOVERY + "\nlock_lifecycle\nrollback health new", ok=False)
@@ -460,7 +472,11 @@ nsrun() { "$BB" sha256sum "$MODDIR/live/$1/${4##*/}"; }
         watchdog = next(
             line for line in CONTROL.splitlines() if "setsid" in line and '/watchdog.sh"' in line
         )
-        policy = next(line for line in CONTROL.splitlines() if '/config.sh" start' in line)
+        policy = next(
+            line
+            for line in (ROOT / "module/lib/policy.sh").read_text().splitlines()
+            if "setsid" in line and '/config.sh" watch' in line
+        )
         for launch in [health + "\nprocess_start() { echo 1234; }\nstart_health", watchdog, policy]:
             with self.subTest(launch=launch.splitlines()[-1]):
                 self.run_shell("lock_lifecycle\ntoken=test; trial_seconds=60\n" + launch + "\nwait")
@@ -472,6 +488,37 @@ nsrun() { "$BB" sha256sum "$MODDIR/live/$1/${4##*/}"; }
         health = CONTROL[CONTROL.index("start_health()") : CONTROL.index("start_policy()")]
         self.run_shell(health + "\nprocess_start() { echo new-start; }\nstart_health", ok=False)
         self.assertFalse((self.state / "health-token").exists())
+
+    def test_keep_prepares_health_and_policy_before_disarming(self):
+        helper = CONTROL[CONTROL.index("keep_session()") : CONTROL.index("allowed()")]
+        for failing in ["health", "policy", "none"]:
+            with self.subTest(failing=failing):
+                (self.state / "armed").write_text("current\n")
+                script = (
+                    helper
+                    + f"""
+verify_active_payloads() {{ :; }}
+start_health() {{ [ -f "$STATE/armed" ] && [ {failing} != health ]; }}
+start_policy() {{ [ -f "$STATE/armed" ] && [ {failing} != policy ]; }}
+keep_session
+"""
+                )
+                self.run_shell(script, ok=failing == "none")
+                self.assertEqual((self.state / "armed").exists(), failing != "none")
+
+    def test_policy_config_and_worker_failures_are_propagated(self):
+        helper = CONTROL[CONTROL.index("start_policy()") : CONTROL.index("keep_session()")]
+        (self.state / "active").touch()
+        failure = 'stop_policy() { touch "$MODDIR/policy-called"; return 23; }\nrequire_qhs_backend() { :; }\n'
+        for enabled in ["true", "false"]:
+            self.run_shell(
+                helper + failure + f"\nextension_value() {{ echo {enabled}; }}\nstart_policy",
+                ok=False,
+            )
+            self.assertTrue((self.d / "policy-called").exists())
+            (self.d / "policy-called").unlink()
+        self.run_shell(helper + "\nextension_value() { return 24; }\nstart_policy", ok=False)
+        self.assertFalse((self.d / "policy-called").exists())
 
     def property_fixture(self):
         self.db = self.d / "properties.json"

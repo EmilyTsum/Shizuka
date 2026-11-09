@@ -25,6 +25,7 @@ def verify_policies(android_jar=None):
             "ExtensionConfig",
             "DevicePreferences",
             "CodecPresentation",
+            "ExtensionConfigStore",
         ]
     ]
     subprocess.run(
@@ -94,6 +95,8 @@ def verify_policies(android_jar=None):
             (["device", "active", "transport", "output", "invalid"], "invalid transport"),
             (["device", "not-an-address", "get"], "invalid Bluetooth address"),
             (["device", "active", "profile", "unknown", "true"], "invalid profile"),
+            (["set", "target_address", "AA:BB:CC:DD:EE:FF"], "only extension settings"),
+            (["set", "adaptive_priority", "-1"], "invalid adaptive_priority"),
         ]:
             result = subprocess.run([*cli, *command], capture_output=True, text=True)
             if result.returncode != 1 or expected not in result.stderr or "Stub!" in result.stderr:
