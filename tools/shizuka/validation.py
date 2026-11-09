@@ -12,6 +12,8 @@ POLICY_CASES = (
     ("extension_store", "ExtensionConfigStoreTest"),
 )
 PYTHON_CASES = (
+    ("apk_handoff", "apk_handoff_check.py"),
+    ("apk_le_route", "apk_le_route_check.py"),
     ("qhs_nvm", "qhs_nvm_test.py"),
     ("module_lifecycle", "module_lifecycle_test.py"),
     ("device_profiles", "device_profiles_test.py"),
