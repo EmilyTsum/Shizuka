@@ -14,6 +14,8 @@ Lossless selection is separate from the observed encoder state and receiver bit-
 
 The optional, offline [Adaptive HQ/Lossless and Adaptive LL TTP experiment](docs/TTP-TRIAL.md) has independent integer increments (HQ/Lossless 0..150 ms, Adaptive LL 0..100 ms; step 1). Typed controls and device/provider contexts share one definition catalog; exact-image DSP implementations are separate backends. The included implementation targets the verified DZIF image. It is excluded from normal module payloads and has no automatic device activation; the device loader rejected the modified candidates before execution. Offline instruction results do not establish runtime support.
 
+The separate [external encoded-TTP experiment](experiments/latency/README.md) retains the signed DSP and implements an APSS packet transform with runtime values, including reading the UI's configuration file. Its native file transform has been checked on the phone; live HAL-owned transport and receiver timing remain unimplemented. It is excluded from the module build. Standalone GPR diagnostics are prohibited on this firmware because closing that device can terminate existing audio graphs; the experiment documents the required HAL transport ownership.
+
 ## Build
 
 Requirements: Python 3.10+, a host C++17 compiler, JDK 17+ with JNI headers, Android SDK platform 35/build-tools 35.0.0, and NDK 26.1.10909125. The Samsung APK backend also requires apktool 3.0.3. The companion app uses Gradle 8.10.2, AGP 8.7.3, and pinned OneUIProject Maven dependencies (JDK 17).
