@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -76,6 +77,7 @@ def build_apk(tools):
         check=True,
     )
     subprocess.run([str(tools / "zipalign"), "-c", "-P", "16", "4", str(output)], check=True)
+    subprocess.run([sys.executable, str(ROOT / "tests/apk_offload_hq_check.py")], check=True)
     with (
         zipfile.ZipFile(INPUTS / "Bluetooth.apk") as before,
         zipfile.ZipFile(output) as after,

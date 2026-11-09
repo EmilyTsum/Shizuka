@@ -19,7 +19,7 @@ pip install -r requirements.txt
 python tools/build_all.py
 ```
 
-Output: `dist/Shizuka-DZIF-0.7.1-test.zip`. Install through KernelSU, then use the module's Action button to apply it. New builds have no audio verification proof and run as a 15-minute trial with automatic rollback. To restore manually:
+Output: `dist/Shizuka-DZIF-0.7.2-test.zip`. Install through KernelSU, then use the module's Action button to apply it. New builds have no audio verification proof and run as a 15-minute trial with automatic rollback. To restore manually:
 
 ```sh
 su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'

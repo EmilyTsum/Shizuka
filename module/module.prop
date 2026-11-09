@@ -1,6 +1,6 @@
 id=s25_aptx_adaptive
 name=Shizuka (S25 DZIF Bluetooth)
-version=0.7.1-test
-versionCode=8
+version=0.7.2-test
+versionCode=9
 author=EmilyTsum
 description=Experimental aptX Adaptive/Lossless/LL and LE Audio fixes for SM-S931Z DZIF, with optional QHS controller enablement.

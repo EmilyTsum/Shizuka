@@ -58,6 +58,18 @@
           "insert": "    invoke-virtual {p3}, Landroid/bluetooth/BluetoothCodecConfig;->getCodecType()I\n\n    move-result v1\n\n    const/4 v2, 0x7\n\n    if-eq v1, v2, :cond_4\n\n    const/16 v2, 0xc\n\n    if-eq v1, v2, :cond_4\n\n"
         }
       ]
+    },
+    {
+      "path": "smali/com/android/bluetooth/a2dp/A2dpService.smali",
+      "before_sha256": "5d86657df382d41cd9a89926bbaa3b747904edbd2dfc5a8255d255cffe88c463",
+      "after_sha256": "353969c3f7b710526d2538fe42058addebb12c115abcbe1c7d6101d1321398a8",
+      "edits": [
+        {
+          "line": 1728,
+          "delete": 0,
+          "insert": "    invoke-virtual {p0, p1}, Lcom/android/bluetooth/a2dp/A2dpService;->getCodecStatus(Landroid/bluetooth/BluetoothDevice;)Landroid/bluetooth/BluetoothCodecStatus;\n\n    move-result-object v0\n\n    if-eqz v0, :s25_hq_stock\n\n    invoke-virtual {v0}, Landroid/bluetooth/BluetoothCodecStatus;->getCodecConfig()Landroid/bluetooth/BluetoothCodecConfig;\n\n    move-result-object v0\n\n    if-eqz v0, :s25_hq_stock\n\n    invoke-virtual {v0}, Landroid/bluetooth/BluetoothCodecConfig;->getCodecType()I\n\n    move-result v0\n\n    const/4 v1, 0x7\n\n    if-eq v0, v1, :s25_hq_proxy\n\n    const/16 v1, 0xc\n\n    if-ne v0, v1, :s25_hq_stock\n\n    :s25_hq_proxy\n    const/4 v0, 0x0\n\n    return v0\n\n    :s25_hq_stock\n"
+        }
+      ]
     }
   ]
 }
