@@ -31,6 +31,7 @@ def main():
         "classic_qhs_policy",
         "controller_features",
         "qhs_nvm",
+        "module_lifecycle",
     }
     if (
         len(tests) != len(required_tests)

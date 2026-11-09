@@ -106,16 +106,19 @@ print(features_result.stdout.strip())
 results.append(
     {"test": "controller_features", "passed": True, "output": features_result.stdout.strip()}
 )
-nvm_result = subprocess.run(
-    [__import__("sys").executable, str(r / "tests/qhs_nvm_test.py")],
-    check=True,
-    capture_output=True,
-    text=True,
-)
-print(nvm_result.stdout.strip() + nvm_result.stderr.strip())
-results.append(
-    {"test": "qhs_nvm", "passed": True, "output": (nvm_result.stdout + nvm_result.stderr).strip()}
-)
+for name, filename in [
+    ("qhs_nvm", "qhs_nvm_test.py"),
+    ("module_lifecycle", "module_lifecycle_test.py"),
+]:
+    result = subprocess.run(
+        [__import__("sys").executable, str(r / "tests" / filename)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    output = (result.stdout + result.stderr).strip()
+    print(output)
+    results.append({"test": name, "passed": True, "output": output})
 (r / "evidence/ll-offline-tests.json").write_text(
     json.dumps(results, ensure_ascii=False, indent=2) + "\n"
 )

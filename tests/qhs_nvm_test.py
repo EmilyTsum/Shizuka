@@ -142,7 +142,7 @@ owned
         trapline = [
             line.strip()
             for line in source.splitlines()
-            if line.strip().startswith("trap 'code=$?;")
+            if line.strip().startswith("trap '") and line.strip().endswith("' EXIT")
         ][0]
         script = (
             f'MODDIR="{self.d}"; STATE="{state}"; BB="{bb}"\nfail() {{ exit 1; }}\n'

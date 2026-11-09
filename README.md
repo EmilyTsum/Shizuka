@@ -27,6 +27,8 @@ su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'
 
 Host tests only: `python tools/verify_offline.py --host-only` (`JAVA_HOME` required). A full run also builds the native artifacts and executes the actual ARM64 HAL/offload dispatch branches with Unicorn, comparing stock codec routes and the two private codec routes. See [STATUS.md](docs/STATUS.md) for test coverage and known issues.
 
+Module lifecycle tests run separately without Android tools or stock inputs: `python3 tests/module_lifecycle_test.py`. See [MODULE.md](docs/MODULE.md) for activation, recovery, and state handling.
+
 Codec status: open the module's **WebUI** (`<>`) in KernelSU. It shows the current media route and Android codec selection. Refresh is read-only; optional automatic refresh starts off. Lossless selection is not proof of lossless transmission.
 
 GPL-2.0-only. The license covers this repository's code and modifications, not your proprietary stock files.
