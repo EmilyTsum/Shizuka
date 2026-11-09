@@ -25,7 +25,7 @@ pip install -r requirements.txt
 python tools/build_all.py
 ```
 
-Output: `dist/Shizuka-samsung-sm-s931z-dzif-0.8.0-test.zip`. Install through KernelSU, then use Action. New archives have no inherited audio proof and start as a 15-minute trial with automatic rollback. Manual restoration:
+Output: `dist/Shizuka-samsung-sm-s931z-dzif-0.8.1-test.zip`. Install through KernelSU, then use Action. New archives have no inherited audio proof and start as a 15-minute trial with automatic rollback. Manual restoration:
 
 ```sh
 su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'

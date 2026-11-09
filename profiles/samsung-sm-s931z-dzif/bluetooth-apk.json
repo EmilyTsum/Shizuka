@@ -16,12 +16,27 @@
     {
       "path": "smali/com/android/bluetooth/btservice/AdapterService.smali",
       "before_sha256": "3fcfeea4bf69520bcff51f9d1a76558199b6cf8ff0660e1de563cf8bb6eb9654",
-      "after_sha256": "7962dd340dce6b820352b116f3cc0afd8d0d4c394f80c82a0d87e0f839479fdb",
+      "after_sha256": "bafbad9f083bdae4586e72371313670798238a7b13ac431d252a9f0e3570d8f8",
       "edits": [
         {
           "line": 4336,
           "delete": 0,
           "insert": "    return-void\n.end method\n\n.method private s25CompletePreferredRequest(Landroid/os/Bundle;)V\n    .locals 5\n\n    if-eqz p1, :cond_2\n\n    iget-object v0, p0, Lcom/android/bluetooth/btservice/AdapterService;->mCsipGroupsPendingAudioProfileChanges:Ljava/util/Map;\n\n    monitor-enter v0\n\n    :try_start_0\n    invoke-interface {v0}, Ljava/util/Map;->values()Ljava/util/Collection;\n\n    move-result-object v1\n\n    invoke-interface {v1}, Ljava/util/Collection;->iterator()Ljava/util/Iterator;\n\n    move-result-object v1\n\n    :cond_0\n    :goto_0\n    invoke-interface {v1}, Ljava/util/Iterator;->hasNext()Z\n\n    move-result v2\n\n    if-eqz v2, :cond_1\n\n    invoke-interface {v1}, Ljava/util/Iterator;->next()Ljava/lang/Object;\n\n    move-result-object v2\n\n    check-cast v2, Lcom/android/bluetooth/btservice/AdapterService$PendingAudioProfilePreferenceRequest;\n\n    iget-object v3, v2, Lcom/android/bluetooth/btservice/AdapterService$PendingAudioProfilePreferenceRequest;->preferences:Landroid/os/Bundle;\n\n    if-ne v3, p1, :cond_0\n\n    invoke-interface {v1}, Ljava/util/Iterator;->remove()V\n\n    goto :goto_0\n\n    :cond_1\n    monitor-exit v0\n    :try_end_0\n    .catchall {:try_start_0 .. :try_end_0} :catchall_0\n\n    goto :goto_1\n\n    :catchall_0\n    move-exception v4\n\n    monitor-exit v0\n\n    throw v4\n\n    :cond_2\n    :goto_1\n"
+        },
+        {
+          "line": 18254,
+          "delete": 0,
+          "insert": ".method private s25RequiresClassicAudioProfile(Landroid/bluetooth/BluetoothDevice;I)Z\n    .locals 1\n\n    invoke-virtual {p0, p1, p2}, Lcom/android/bluetooth/btservice/AdapterService;->isProfileSupported(Landroid/bluetooth/BluetoothDevice;I)Z\n\n    move-result v0\n\n    if-eqz v0, :s25_classic_required_done\n\n    invoke-virtual {p0, p1, p2}, Lcom/android/bluetooth/btservice/AdapterService;->getProfileConnectionPolicy(Landroid/bluetooth/BluetoothDevice;I)I\n\n    move-result v0\n\n    if-eqz v0, :s25_classic_required_done\n\n    const/4 v0, 0x1\n\n    :s25_classic_required_done\n    return v0\n.end method\n\n"
+        },
+        {
+          "line": 18277,
+          "delete": 1,
+          "insert": "    invoke-direct {p0, p1, v1}, Lcom/android/bluetooth/btservice/AdapterService;->s25RequiresClassicAudioProfile(Landroid/bluetooth/BluetoothDevice;I)Z\n"
+        },
+        {
+          "line": 18284,
+          "delete": 1,
+          "insert": "    invoke-direct {p0, p1, v4}, Lcom/android/bluetooth/btservice/AdapterService;->s25RequiresClassicAudioProfile(Landroid/bluetooth/BluetoothDevice;I)Z\n"
         },
         {
           "line": 24990,

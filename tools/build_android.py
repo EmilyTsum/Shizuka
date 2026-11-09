@@ -76,6 +76,7 @@ def build_apk(tools):
     )
     subprocess.run([str(tools / "zipalign"), "-c", "-P", "16", "4", str(output)], check=True)
     subprocess.run([sys.executable, str(ROOT / "tests/apk_offload_hq_check.py")], check=True)
+    subprocess.run([sys.executable, str(ROOT / "tests/apk_le_route_check.py")], check=True)
     with (
         zipfile.ZipFile(INPUTS / "Bluetooth.apk") as before,
         zipfile.ZipFile(output) as after,
