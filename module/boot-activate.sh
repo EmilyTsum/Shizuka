@@ -39,7 +39,7 @@ if [ "${1:-}" != manual ] && [ -f "$STATE/boot-attempt" ] && [ "$(cat "$STATE/bo
  echo 'Already attempted this framework session; skipped';exit 0
 fi
 echo "$session" > "$STATE/boot-attempt"
-if [ -f "$STATE/active" ] || [ -f "$STATE/armed" ];then
+if recovery_pending;then
  "$BB" sh "$MODDIR/control.sh" rollback
  sleep 8
 fi

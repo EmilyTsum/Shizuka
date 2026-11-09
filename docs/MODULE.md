@@ -22,6 +22,8 @@ Workers call `rollback-trial TOKEN` or `rollback-health TOKEN`. The controller c
 
 New activations save both PID and `/proc/PID/stat` start time for Bluetooth and the audio HAL. The shared verifier checks these identities and all three live APK/native/HAL hashes before a session is kept. The watchdog also checks process start time, so PID reuse does not hide the original process exiting. Older PID-only records retain the previous liveness check until the next activation writes complete records.
 
+Active/trial markers, a nonempty mount journal, and pending QHS restoration all count as recovery state. Action and boot activation restore this state before starting another generation. Direct activation refuses to overwrite it, including when an interrupted recovery has already removed the active/trial markers. The read-only `control.sh status` reports pending recovery instead of declaring that state inactive.
+
 The health watcher starts before the trial is disarmed. If reading the process identity or preparing the watcher fails, the rollback arm remains present.
 
 ## Property snapshots

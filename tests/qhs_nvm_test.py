@@ -106,7 +106,10 @@ owned
         )
         bb.chmod(0o755)
         source = (P / "module/control.sh").read_text()
-        functions = source[source.index("qhs_pending()") : source.index('case "${1:-status}"')]
+        functions = (
+            f'. "{P / "module/lib/runtime.sh"}"\n'
+            + source[source.index("qhs_features()") : source.index('case "${1:-status}"')]
+        )
         script = (
             f'MODDIR="{self.d}"; STATE="{state}"; BB="{bb}"\nfail() {{ exit 1; }}\n'
             + functions
@@ -138,7 +141,10 @@ owned
         )
         bb.chmod(0o755)
         source = (P / "module/control.sh").read_text()
-        functions = source[source.index("qhs_pending()") : source.index('case "${1:-status}"')]
+        functions = (
+            f'. "{P / "module/lib/runtime.sh"}"\n'
+            + source[source.index("qhs_features()") : source.index('case "${1:-status}"')]
+        )
         trapline = [
             line.strip()
             for line in source.splitlines()

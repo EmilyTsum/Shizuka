@@ -14,7 +14,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SHELL = shlex.split(os.environ.get("SHIZUKA_TEST_SHELL", "sh"))
 CONTROL = (ROOT / "module/control.sh").read_text()
-RECOVERY = CONTROL[CONTROL.index("qhs_pending()") : CONTROL.index('case "${1:-status}"')]
+RECOVERY = CONTROL[CONTROL.index("qhs_features()") : CONTROL.index('case "${1:-status}"')]
 
 
 class Lifecycle(unittest.TestCase):
@@ -118,6 +118,141 @@ else:
         self.run_shell('token_matches "$STATE/armed" new')
         for value in ["old", ""]:
             self.run_shell('token_matches "$STATE/armed" ' + shlex.quote(value), ok=False)
+
+    def pending_record(self, name):
+        path = self.state / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("record\n" if name == "mounts.tsv" else "")
+        return path
+
+    def test_recovery_pending_includes_orphaned_mount_and_qhs_records(self):
+        self.run_shell("recovery_pending", ok=False)
+        for name in ["active", "armed", "mounts.tsv", "qhs-nvm/intent", "qhs-nvm/restoring"]:
+            with self.subTest(record=name):
+                path = self.pending_record(name)
+                self.run_shell("recovery_pending")
+                path.unlink()
+                self.run_shell("recovery_pending", ok=False)
+        (self.state / "mounts.tsv").touch()
+        self.run_shell("recovery_pending", ok=False)
+
+    def test_activation_refuses_to_overwrite_unfinished_recovery(self):
+        body = CONTROL.split("\n activate)\n", 1)[1]
+        journal = '  : > "$STATE/mounts.tsv"'
+        prefix = body.split(journal, 1)[0] + journal + "\n"
+        (self.d / "proofs").mkdir()
+        (self.d / "proofs/offline-ready").touch()
+        (self.d / "inputs.sha256").touch()
+        checks = """
+check_inputs() { touch "$MODDIR/checked"; }
+check_payloads() { :; }
+host_zygote() { echo 4242; }
+"""
+        for name in ["mounts.tsv", "qhs-nvm/intent", "qhs-nvm/restoring"]:
+            with self.subTest(record=name):
+                path = self.pending_record(name)
+                original = path.read_text()
+                result = self.run_shell(checks + prefix, ok=False)
+                self.assertIn("unfinished recovery", result.stderr)
+                self.assertEqual(path.read_text(), original)
+                self.assertFalse((self.d / "checked").exists())
+                path.unlink()
+
+    def test_status_reports_unfinished_recovery_without_mutating_it(self):
+        body = CONTROL.split("\n status)\n", 1)[1].split("\n preflight)", 1)[0]
+        script = (
+            'check_inputs() { :; }\nlog() { echo "$*"; }\n'
+            + "case status in status)\n"
+            + body
+            + "\nesac\n"
+        )
+        for name in ["armed", "mounts.tsv", "qhs-nvm/intent", "qhs-nvm/restoring"]:
+            with self.subTest(record=name):
+                path = self.pending_record(name)
+                result = self.run_shell(script, ok=False)
+                self.assertIn("recovery pending", result.stderr)
+                self.assertTrue(path.exists())
+                path.unlink()
+        self.assertIn("stock hashes match; inactive", self.run_shell(script).stdout)
+
+    def recovery_entry_fixture(self, filename):
+        (self.d / "lib").mkdir()
+        (self.d / "lib/runtime.sh").write_text((ROOT / "module/lib/runtime.sh").read_text())
+        entry = self.d / filename
+        entry.write_text(
+            (ROOT / "module" / filename)
+            .read_text()
+            .replace("BB=/data/adb/ksu/bin/busybox", 'BB="$MODDIR/bb"')
+        )
+        (self.d / "control.sh").write_text("""
+MODDIR=${0%/*}
+printf '%s\n' "$1" >> "$MODDIR/calls"
+case "$1" in
+ rollback) rm -f "$MODDIR/state/active" "$MODDIR/state/armed" "$MODDIR/state/mounts.tsv" "$MODDIR/state/qhs-nvm/intent" "$MODDIR/state/qhs-nvm/restoring";;
+ activate) touch "$MODDIR/state/active";;
+esac
+""")
+        return entry
+
+    def test_action_restores_orphaned_state_before_starting_another_trial(self):
+        entry = self.recovery_entry_fixture("action.sh")
+        calls = self.d / "calls"
+        for name in ["mounts.tsv", "qhs-nvm/intent", "qhs-nvm/restoring"]:
+            with self.subTest(record=name):
+                path = self.pending_record(name)
+                result = subprocess.run(
+                    SHELL + [str(entry)], env=self.env, capture_output=True, text=True, timeout=5
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    calls.read_text().splitlines(), ["rollback", "preflight", "activate", "status"]
+                )
+                self.assertFalse(path.exists())
+                (self.state / "active").unlink()
+                calls.unlink()
+        # An already healthy active generation keeps the existing idempotent Action behavior.
+        (self.state / "active").touch()
+        result = subprocess.run(
+            SHELL + [str(entry)], env=self.env, capture_output=True, text=True, timeout=5
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls.read_text().splitlines(), ["status"])
+
+    def test_boot_worker_restores_orphaned_state_before_reactivation(self):
+        entry = self.recovery_entry_fixture("boot-activate.sh")
+        with (self.d / "lib/runtime.sh").open("a") as runtime:
+            runtime.write("""
+host_zygote() { echo 4242; }
+host_bt() { echo 4343; }
+process_start() { echo 1234; }
+sleep() { :; }
+cat() { if [ "$1" = /proc/sys/kernel/random/boot_id ]; then echo test-boot; else command cat "$@"; fi; }
+""")
+        getprop = self.d / "getprop"
+        getprop.write_text("#!/bin/sh\necho 1\n")
+        getprop.chmod(0o755)
+        (self.d / "proofs").mkdir()
+        (self.d / "payloads.sha256").write_text("same generation\n")
+        (self.d / "proofs/verified-payloads.sha256").write_text("same generation\n")
+        calls = self.d / "calls"
+        for name in ["mounts.tsv", "qhs-nvm/intent", "qhs-nvm/restoring"]:
+            with self.subTest(record=name):
+                path = self.pending_record(name)
+                result = subprocess.run(
+                    SHELL + [str(entry), "manual"],
+                    env=self.env,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    calls.read_text().splitlines(),
+                    ["rollback", "preflight", "activate", "keep-verified"],
+                )
+                self.assertFalse(path.exists())
+                (self.state / "active").unlink()
+                calls.unlink()
 
     def active_fixture(self):
         files = [

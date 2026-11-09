@@ -95,7 +95,6 @@ check_payloads() {
  done < "$MODDIR/payloads.sha256"
  [ "$count" = 4 ] || fail 'incomplete payload manifest'
 }
-qhs_pending() { [ -e "$STATE/qhs-nvm/intent" ] || [ -e "$STATE/qhs-nvm/restoring" ]; }
 qhs_features() {
  "$BB" sh "$MODDIR/config.sh" controller-features > "$STATE/qhs-controller-features.json"
  "$BB" grep -Eq '"local_enabled"[[:space:]]*:[[:space:]]*'"$1"'([,}[:space:]])' "$STATE/qhs-controller-features.json" || fail 'controller QHS local capability readback mismatch'
@@ -120,7 +119,7 @@ rollback() (
    touch "$MODDIR/.no-auto"
    ;;
  esac
- if [ ! -f "$STATE/active" ] && [ ! -f "$STATE/armed" ] && [ ! -s "$STATE/mounts.tsv" ] && ! qhs_pending;then check_inputs;log 'already inactive; stock hashes match';return;fi
+ if ! recovery_pending;then check_inputs;log 'already inactive; stock hashes match';return;fi
  if [ -f "$MODDIR/config.sh" ];then "$BB" sh "$MODDIR/config.sh" stop || true;fi
  rm -f "$STATE/health-token"
  qhs_restoring=0
@@ -179,14 +178,18 @@ case "${1:-status}" in
    verify_active_payloads
    log "active; exact APK/native/HAL hashes verified; Bluetooth=$live_bt HAL=$live_hal"
    if [ -f "$STATE/armed" ];then log 'trial: watchdog armed';fi
-  else check_inputs;log 'stock hashes match; inactive';fi
+  else
+   check_inputs
+   if recovery_pending;then fail 'recovery pending; use Action or rollback to restore stock';fi
+   log 'stock hashes match; inactive'
+  fi
   ;;
  preflight) check_inputs;check_payloads;log 'all input and payload hashes match; no mounts performed';;
  activate)
   trial_seconds=${2:-180}
   case "$trial_seconds" in ''|*[!0-9]*) fail 'invalid trial duration';;esac
   [ "$trial_seconds" -ge 60 ] && [ "$trial_seconds" -le 900 ] || fail 'trial duration must be 60..900 seconds'
-  [ ! -f "$STATE/active" ] && [ ! -f "$STATE/armed" ] || fail 'already active or armed'
+  if recovery_pending;then fail 'active or unfinished recovery; run rollback before activating';fi
   check_inputs;check_payloads
   if [ -f /data/adb/s25_bluetooth/config.conf ];then "$BB" sh "$MODDIR/config.sh" validate;fi
   [ -f "$MODDIR/proofs/offline-ready" ] || fail 'offline integration proof missing'

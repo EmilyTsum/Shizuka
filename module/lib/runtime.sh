@@ -40,6 +40,10 @@ saved_process_matches() (
  fi
 )
 token_matches() { [ -n "$2" ] && [ -f "$1" ] && [ "$(cat "$1" 2>/dev/null)" = "$2" ]; }
+qhs_pending() { [ -e "$STATE/qhs-nvm/intent" ] || [ -e "$STATE/qhs-nvm/restoring" ]; }
+recovery_pending() {
+ [ -f "$STATE/active" ] || [ -f "$STATE/armed" ] || [ -s "$STATE/mounts.tsv" ] || qhs_pending
+}
 
 lock_lifecycle() {
  [ ! -L "$STATE" ] || fail 'unsafe state symlink'
