@@ -10,8 +10,9 @@ class Nvm(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.d = pathlib.Path(self.tmp.name)
         self.functions = (
-            (P / "module/qhs-nvm.sh").read_text().split("# Sourceable function definitions")[0]
+            (P / "module/qhs-nvm.sh").read_text().split("# Sourceable function definitions")[0].split("bad() {", 1)[1]
         )
+        self.functions = "bad() {" + self.functions
         self.bb = self.d / "bb"
         self.bb.write_text("""#!/usr/bin/env python3
 import sys,os,hashlib,subprocess
@@ -86,7 +87,7 @@ owned
             )
         ]
         r = subprocess.run(
-            ["sh", "-c", block + '\n[ "$qhs_enabled" = false ]'], capture_output=True
+            ["sh", "-c", f'. "{P / "module/lib/config.sh"}"\nCONFIG_FILE="{self.d}/missing"; LEGACY_CONFIG="{self.d}/also-missing"\n' + block + '\n[ "$qhs_enabled" = false ]'], capture_output=True
         )
         self.assertEqual(r.returncode, 0, r.stderr.decode())
 

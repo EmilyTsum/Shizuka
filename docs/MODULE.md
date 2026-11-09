@@ -10,7 +10,9 @@ The module retains the exact DZIF stock and payload hash checks, late runtime mo
 | `watchdog.sh` | Request recovery when the trial expires or its Bluetooth process exits. |
 | `health.sh` | Watch a kept Bluetooth process and request recovery if its identity changes. |
 | `lib/runtime.sh` | Shared host-process discovery, process identity, live payload checks, tokens, and lifecycle locking. |
-| `lib/properties.sh` | The managed Android property list and snapshot/restoration rules. |
+| `lib/properties.sh` | Generic property snapshots, write ownership and restoration rules. |
+| `lib/config.sh` | Optional extension configuration and legacy-location lookup. |
+| `lib/device.sh`, `profiles/` | Validated bundled backend selection and device-specific operations. |
 
 ## Serialized recovery
 
@@ -28,7 +30,9 @@ The health watcher starts before the trial is disarmed. If reading the process i
 
 ## Property snapshots
 
-Each managed property has a saved value and an `-existed` marker. New snapshots carry `state/properties-v1`, allowing rollback to restore an existing empty value and remove a property that was originally absent. Snapshots from earlier versions keep their original restoration rules for properties whose absence was not recorded. Property values remain data and are never sourced as shell code.
+The backend declares which technical properties it may change. Each has a saved value and an `-existed` marker. New snapshots use `state/properties-v2` and a write-intent journal; the intent and intended value are recorded before each actual write. Unchanged properties are not owned. Recovery restores only owned values that still match the module's write, preserving subsequent user/system changes. A missing/corrupt journal retains recovery state instead of silently skipping cleanup. Empty-value and originally-absent properties remain distinct.
+
+Older snapshots retain their previous restoration rules. Property values are data and are never sourced as shell code. Default codec priorities, voice settings and btsnoop logging follow Android; backend-required codec exposure properties and explicit extension overrides are separate from per-device settings. See [SETTINGS.md](SETTINGS.md).
 
 ## Host checks
 

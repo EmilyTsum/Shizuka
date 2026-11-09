@@ -45,7 +45,7 @@ function render(snapshot) {
     text("mode", codec ? codec.mode || numbers(codec.frame_durations_us, " µs") : "—");
     text("stream", device && typeof device.stream_started === "boolean" ? (device.stream_started ? "Set" : "Clear") : "Not reported");
     text("audio-mode", ({0: "Normal", 1: "Ringtone", 2: "In call", 3: "Communication", 4: "Call screening"})[route.audio_mode] || "Not reported");
-    text("selection-note", codec && codec.type === 12 && route.transport === "A2DP" ? "Lossless is selected in Android. Its 16-bit display does not describe the DSP PCM input or confirm lossless transmission." : "The Android selection is separate from the DSP input format and actual radio transmission.");
+    text("selection-note", codec && codec.lossless_selection === true && route.transport === "A2DP" ? "Lossless is selected in Android. Its 16-bit display does not describe the DSP PCM input or confirm lossless transmission." : "The Android selection is separate from the DSP input format and actual radio transmission.");
     const dsp = snapshot.dsp || {};
     byId("dsp-values").hidden = !dsp.available;
     text("dsp-note", dsp.available ? "Fresh encoder observation; this is not a bit-perfect test." : "Not observed. " + (dsp.reason || "Diagnostics are not running."));

@@ -17,11 +17,10 @@ if [ "$shell_exe" != "$bb_exe" ];then
  exec "$BB" sh "$0" "$@"
 fi
 STATE="$MODDIR/state"
-NATIVE=/apex/com.android.bt/lib64/libbluetooth_jni.so
-HAL=/vendor/lib64/libsehbluetooth_audio_session_aidl.so
-APK=/apex/com.android.bt/app/Bluetooth@CP2A.260605.016/Bluetooth.apk
+. "$MODDIR/lib/device.sh"
 . "$MODDIR/lib/runtime.sh"
 . "$MODDIR/lib/properties.sh"
+. "$MODDIR/lib/config.sh"
 # Serialize activation, commit and recovery, including watchdog requests.
 case "${1:-}" in
  activate|commit|keep-verified|rollback|rollback-trial|rollback-health) lock_lifecycle;;
@@ -61,17 +60,14 @@ start_health() {
  echo $! > "$STATE/health.pid"
 }
 start_policy() {
- if [ -f /data/adb/s25_bluetooth/config.conf ];then
-  "$BB" sh "$MODDIR/config.sh" apply-transport > "$STATE/policy-apply.log" 2>&1 || log "profile preference deferred; see state/policy-apply.log"
+ if [ "$(extension_value classic_qhs_host_aware)" = true ];then
   "$BB" sh "$MODDIR/config.sh" start 9>&- || log "policy watcher did not start"
+ else
+  "$BB" sh "$MODDIR/config.sh" stop 9>&- || log "policy watcher did not stop"
  fi
 }
-allowed() {
- case "$1" in
-  "$NATIVE"|"$HAL"|/vendor/lib64/btaudio_offload_if.so|/apex/com.android.bt/app/Bluetooth@CP2A.260605.016/Bluetooth.apk|/apex/com.android.bt/javalib/framework-bluetooth.jar) return 0;;
-  *) return 1;;
- esac
-}
+allowed() { profile_target_allowed "$1"; }
+
 check_inputs() {
  [ -s "$MODDIR/inputs.sha256" ] || fail 'profile missing'
  count=0
@@ -81,15 +77,13 @@ check_inputs() {
   [ "$(sha "$path")" = "$digest" ] || fail "input hash mismatch: $path"
   count=$((count+1))
  done < "$MODDIR/inputs.sha256"
- [ "$count" = 5 ] || fail 'incomplete profile'
+ [ "$count" = "$STOCK_TARGET_COUNT" ] || fail 'incomplete profile'
 }
 check_payloads() {
  [ -s "$MODDIR/payloads.sha256" ] || fail 'payload manifest missing'
  count=0
  while IFS=' ' read -r digest name; do
-  case "$name" in patched-libbluetooth_jni.so|patched-libsehbluetooth_audio_session_aidl.so|patched-Bluetooth.apk|runtime.prop) ;;
-   *) fail 'unexpected payload name';;
-  esac
+  profile_payload_allowed "$name" || fail 'unexpected payload name'
   [ "$(sha "$MODDIR/payload/$name")" = "$digest" ] || fail "payload hash mismatch: $name"
   count=$((count+1))
  done < "$MODDIR/payloads.sha256"
@@ -98,7 +92,7 @@ check_payloads() {
 qhs_features() {
  "$BB" sh "$MODDIR/config.sh" controller-features > "$STATE/qhs-controller-features.json"
  "$BB" grep -Eq '"local_enabled"[[:space:]]*:[[:space:]]*'"$1"'([,}[:space:]])' "$STATE/qhs-controller-features.json" || fail 'controller QHS local capability readback mismatch'
- case "$1" in true) qhs_hex=1c7d7ffc31;;false) qhs_hex=1c7d7fcc31;;*) return 1;;esac
+ case "$1" in true) qhs_hex=$QHS_ENABLED_FEATURES;;false) qhs_hex=$QHS_DISABLED_FEATURES;;*) return 1;;esac
  "$BB" grep -Eq '"features_hex"[[:space:]]*:[[:space:]]*"'"$qhs_hex"'"' "$STATE/qhs-controller-features.json" || fail 'controller feature bytes differ from tested profile'
 
 }
@@ -142,14 +136,12 @@ rollback() (
   for one in $current_bt;do nsrun "$one" "$BB" umount -l "$NATIVE" 2>/dev/null || true;nsrun "$one" "$BB" umount -l "$APK" 2>/dev/null || true;done
  fi
  restore_properties || return 1
- previous_hal=$(getprop init.svc_debug_pid.vendor.audio-hal-aidl)
- setprop ctl.restart vendor.audio-hal-aidl
+ previous_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
+ setprop ctl.restart "$AUDIO_HAL_SERVICE"
  hal_wait=0
  while [ "$hal_wait" -lt 20 ];do
-  next_hal=$(getprop init.svc_debug_pid.vendor.audio-hal-aidl)
-  if [ -n "$next_hal" ] && [ "$next_hal" != "$previous_hal" ] && grep -q libsehbluetooth_audio_session_aidl.so "/proc/$next_hal/maps" 2>/dev/null;then
-   if "$BB" timeout 2 service call vendor.samsung.hardware.bluetooth.audio.ISehBluetoothAudioProviderFactory/default 1599098439 2>/dev/null | grep -q 'Result: Parcel';then break;fi
-  fi
+  next_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
+  if profile_hal_ready "$next_hal" "$previous_hal";then break;fi
   sleep 1;hal_wait=$((hal_wait+1))
  done
  [ -z "$current_bt" ] || kill -TERM $current_bt 2>/dev/null || true
@@ -191,7 +183,7 @@ case "${1:-status}" in
   [ "$trial_seconds" -ge 60 ] && [ "$trial_seconds" -le 900 ] || fail 'trial duration must be 60..900 seconds'
   if recovery_pending;then fail 'active or unfinished recovery; run rollback before activating';fi
   check_inputs;check_payloads
-  if [ -f /data/adb/s25_bluetooth/config.conf ];then "$BB" sh "$MODDIR/config.sh" validate;fi
+  if config_exists;then "$BB" sh "$MODDIR/config.sh" validate;fi
   [ -f "$MODDIR/proofs/offline-ready" ] || fail 'offline integration proof missing'
   zpid=$(host_zygote);[ -n "$zpid" ] || fail 'zygote64 unavailable'
   # Verify the app parent's view before the first mutation.
@@ -210,59 +202,41 @@ case "${1:-status}" in
   trap 'rollback' HUP INT TERM
   trap '[ "$?" = 0 ] || rollback' EXIT
   qhs_enabled=false
-  if [ -f /data/adb/s25_bluetooth/config.conf ];then qhs_enabled=$("$BB" sh "$MODDIR/config.sh" value classic_qhs_host_aware);fi
+  qhs_enabled=$(extension_value classic_qhs_host_aware)
   if [ "$qhs_enabled" = true ];then
+   [ "${QHS_SUPPORTED:-false}" = true ] || fail 'QHS is unsupported by this device backend'
    [ "$(cat "$STATE/radio-on")" = 1 ] || fail 'QHS activation requires Bluetooth ON for capability readback'
    "$BB" sh "$MODDIR/qhs-nvm.sh" apply
   fi
   quiesce_radio || fail 'Bluetooth did not enter OFF state before HAL restart'
   # Labels match the original inodes; never create a new target path.
   chown 0:0 "$MODDIR/payload/"*.so "$MODDIR/payload/"*.apk;chmod 0444 "$MODDIR/payload/"*.so "$MODDIR/payload/"*.apk
-  chcon u:object_r:system_lib_file:s0 "$MODDIR/payload/patched-libbluetooth_jni.so"
-  chcon u:object_r:vendor_file:s0 "$MODDIR/payload/patched-libsehbluetooth_audio_session_aidl.so"
-  chcon u:object_r:system_file:s0 "$MODDIR/payload/patched-Bluetooth.apk"
+  chcon "$NATIVE_LABEL" "$MODDIR/payload/$NATIVE_PAYLOAD"
+  chcon "$HAL_LABEL" "$MODDIR/payload/$HAL_PAYLOAD"
+  chcon "$APK_LABEL" "$MODDIR/payload/$APK_PAYLOAD"
   for target_pid in 1 "$zpid";do
    if [ "$target_pid" = 1 ];then check_target=$HAL;else check_target=$NATIVE;fi
    if grep -F " $check_target " "/proc/$target_pid/mountinfo" >/dev/null;then fail "existing file mount at target in namespace $target_pid";fi
    nsid=$("$BB" readlink "/proc/$target_pid/ns/mnt")
    if [ "$target_pid" = 1 ];then
-    nsrun "$target_pid" "$BB" mount -o bind "$MODDIR/payload/patched-libsehbluetooth_audio_session_aidl.so" "$HAL"
+    nsrun "$target_pid" "$BB" mount -o bind "$MODDIR/payload/$HAL_PAYLOAD" "$HAL"
     echo "$target_pid $nsid $HAL" >> "$STATE/mounts.tsv"
    else
-    nsrun "$target_pid" "$BB" mount -o bind "$MODDIR/payload/patched-libbluetooth_jni.so" "$NATIVE"
+    nsrun "$target_pid" "$BB" mount -o bind "$MODDIR/payload/$NATIVE_PAYLOAD" "$NATIVE"
     echo "$target_pid $nsid $NATIVE" >> "$STATE/mounts.tsv"
     if grep -F " $APK " "/proc/$target_pid/mountinfo" >/dev/null;then fail 'existing APK mount';fi
-    nsrun "$target_pid" "$BB" mount -o bind "$MODDIR/payload/patched-Bluetooth.apk" "$APK"
+    nsrun "$target_pid" "$BB" mount -o bind "$MODDIR/payload/$APK_PAYLOAD" "$APK"
     echo "$target_pid $nsid $APK" >> "$STATE/mounts.tsv"
    fi
   done
-  /data/adb/ksu/bin/resetprop -n persist.bluetooth.samsung.a2dp_offload.cap "$(cat "$STATE/samsung-cap")-aptx_hd"
-  /data/adb/ksu/bin/resetprop -n persist.bluetooth.btsnooplogmode full
-  source_priority=4001
-  if [ -f /data/adb/s25_bluetooth/config.conf ];then source_priority=$("$BB" sh "$MODDIR/config.sh" value adaptive_priority);fi
-  /data/adb/ksu/bin/resetprop -n bluetooth.a2dp.source.aptx_adaptive_priority.config "$source_priority"
-  voice_enabled=false
-  if [ -f /data/adb/s25_bluetooth/config.conf ];then voice_enabled=$("$BB" sh "$MODDIR/config.sh" value aptx_voice_enabled);fi
-  /data/adb/ksu/bin/resetprop -n bluetooth.hfp.codec_aptx_voice.enabled "$voice_enabled"
-  hd_priority=4001
-  if [ -f /data/adb/s25_bluetooth/config.conf ];then hd_priority=$("$BB" sh "$MODDIR/config.sh" value aptx_hd_priority);fi
-  /data/adb/ksu/bin/resetprop -n bluetooth.a2dp.source.aptx_hd_priority.config "$hd_priority"
-  case "$(cat "$MODDIR/payload/runtime.prop")" in
-   persist.vendor.qcom.bluetooth.aptxadaptiver2_1_support=true) r21_value=true;;
-   persist.vendor.qcom.bluetooth.aptxadaptiver2_1_support=false) r21_value=false;;
-   *) fail 'unexpected runtime property payload';;
-  esac
-  /data/adb/ksu/bin/resetprop -n persist.vendor.qcom.bluetooth.aptxadaptiver2_1_support "$r21_value"
-  if [ -f "$MODDIR/.enable-dual-mode" ];then /data/adb/ksu/bin/resetprop -n persist.bluetooth.enable_dual_mode_audio true;fi
+  profile_apply_properties
   old_bt=$(host_bt || true)
-  old_hal=$(getprop init.svc_debug_pid.vendor.audio-hal-aidl)
-  setprop ctl.restart vendor.audio-hal-aidl
+  old_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
+  setprop ctl.restart "$AUDIO_HAL_SERVICE"
   hal_ready=0;hal_attempt=0
   while [ "$hal_attempt" -lt 30 ];do
-   candidate_hal=$(getprop init.svc_debug_pid.vendor.audio-hal-aidl)
-   if [ -n "$candidate_hal" ] && [ "$candidate_hal" != "$old_hal" ] && grep -q libsehbluetooth_audio_session_aidl.so "/proc/$candidate_hal/maps" 2>/dev/null;then
-    if "$BB" timeout 2 service call vendor.samsung.hardware.bluetooth.audio.ISehBluetoothAudioProviderFactory/default 1599098439 2>/dev/null | grep -q 'Result: Parcel';then hal_ready=1;break;fi
-   fi
+   candidate_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
+   if profile_hal_ready "$candidate_hal" "$old_hal";then hal_ready=1;break;fi
    sleep 1;hal_attempt=$((hal_attempt+1))
   done
   [ "$hal_ready" = 1 ] || fail 'audio HAL factory readiness timeout'
@@ -275,13 +249,13 @@ case "${1:-status}" in
   while [ "$attempt" -lt 35 ];do
    new_bt=$(host_bt || true)
    if [ -n "$new_bt" ] && [ "$new_bt" != "$old_bt" ];then
-    if grep -q libbluetooth_jni.so "/proc/$new_bt/maps";then
+    if grep -Fq "${NATIVE##*/}" "/proc/$new_bt/maps";then
      actual=$(nsrun "$new_bt" "$BB" sha256sum "$NATIVE");actual=${actual%% *}
-     expected=$(sha "$MODDIR/payload/patched-libbluetooth_jni.so")
+     expected=$(sha "$MODDIR/payload/$NATIVE_PAYLOAD")
      [ "$actual" = "$expected" ] || fail 'Bluetooth child did not inherit the exact payload'
      nsid=$("$BB" readlink "/proc/$new_bt/ns/mnt");echo "$new_bt $nsid $NATIVE" >> "$STATE/mounts.tsv"
      actual=$(nsrun "$new_bt" "$BB" sha256sum "$APK");actual=${actual%% *}
-     [ "$actual" = "$(sha "$MODDIR/payload/patched-Bluetooth.apk")" ] || fail 'Bluetooth child APK payload mismatch'
+     [ "$actual" = "$(sha "$MODDIR/payload/$APK_PAYLOAD")" ] || fail 'Bluetooth child APK payload mismatch'
      echo "$new_bt $nsid $APK" >> "$STATE/mounts.tsv"
      record_process bt "$new_bt";loaded=1;break
     fi
@@ -291,11 +265,11 @@ case "${1:-status}" in
   [ "$loaded" = 1 ] || fail 'Bluetooth payload load timeout'
   sleep 8
   [ "$(host_bt || true)" = "$new_bt" ] || fail 'Bluetooth did not remain stable during initialization'
-  new_hal=$(getprop init.svc_debug_pid.vendor.audio-hal-aidl)
+  new_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
   [ -n "$new_hal" ] && [ "$new_hal" != "$old_hal" ] || fail 'audio HAL did not restart'
-  grep -q libsehbluetooth_audio_session_aidl.so "/proc/$new_hal/maps" || fail 'audio HAL library not mapped'
+  grep -Fq "${HAL##*/}" "/proc/$new_hal/maps" || fail 'audio HAL library not mapped'
   actual=$(nsrun "$new_hal" "$BB" sha256sum "$HAL");actual=${actual%% *}
-  [ "$actual" = "$(sha "$MODDIR/payload/patched-libsehbluetooth_audio_session_aidl.so")" ] || fail 'audio HAL payload mismatch'
+  [ "$actual" = "$(sha "$MODDIR/payload/$HAL_PAYLOAD")" ] || fail 'audio HAL payload mismatch'
   record_process hal "$new_hal"
   # Future applications and Bluetooth restarts inherit the stock parent view.
   nsrun "$zpid" "$BB" umount -l "$NATIVE"

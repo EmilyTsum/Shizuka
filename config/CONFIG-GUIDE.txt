@@ -1,25 +1,33 @@
-Shizuka / DZIF test
+Shizuka Bluetooth
 
-External settings: /data/adb/s25_bluetooth/config.conf
-Set target_address in config.example.conf to your bonded device's address.
-Settings are parsed as key=value data, never executed as shell.
-Adaptive defaults to 48 kHz / 24-bit / HQ for stability.
-QHS-enabled Lossless passed a short Air6 Pro transmission and listening test.
-A possible brief initial interruption and long-term stability remain under test.
+Android owns per-device codec selection, sample rate, bit depth, transport and
+profile permissions. Change these through Android Bluetooth Settings/Developer
+Options, or use config.sh device ADDRESS|active for system-backed preferences.
+The plugin does not retain a target address or replay codec defaults on connect.
+Reconnect selection and persistence of detailed codec parameters follow Android.
 
-Module Action starts an unverified build as a 15-minute rollback trial.
-Do not copy another build's audio verification proofs.
+Optional extension file: /data/adb/shizuka/config.conf
+No configuration file is needed for default behavior. Configuration is key=value
+data and is never executed as shell code. See config.example.conf (schema 2).
+
+classic_qhs_host_aware=false: no controller overlay/request or resident policy.
+aptx_voice_enabled=system: leave Android's property unchanged.
+adaptive_priority=system: leave Android's priority property unchanged.
+aptx_hd_priority=system: leave Android's priority property unchanged.
+Explicit technical overrides are applied on module activation. Property recovery
+restores only this activation's changes and preserves later user/system changes.
+
+QHS requires the verified Samsung DZIF backend, a trusted root-owned regular
+configuration file, Bluetooth ON, exact controller firmware and a module
+reactivation. Peer support and radio conditions determine actual QHS/Lossless.
+Controller acceptance or Android's Lossless selection is not bit-perfect proof.
+
+Legacy /data/adb/s25_bluetooth/config.conf remains readable for extension controls.
+Its per-device preferences are ignored; legacy forced defaults inherit Android.
+config.sh migrate writes only the minimal extension file in the new location.
+The old file is preserved. Failed/invalid canonical files do not fall back to it.
+
+KernelSU Action starts an unverified archive as a 15-minute rollback trial.
 Manual restore:
   su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'
-
-Only unmodified stock files matching the hashes in profile.json are supported.
-
-classic_qhs_host_aware=false (default): no QHS NVM overlay or startup request.
-Set true only in a root-owned regular config file, not writable by group/others.
-Module activation then enables two tested DZIF controller NVM bits and requests
-Classic QHS host-aware mode once per observed Bluetooth/service startup.
-Re-activate the module after changing the option; restarting the watcher alone
-does not apply/remove the NVM overlay. Bluetooth must be ON for activation.
-Rollback removes the owned overlay and verifies original controller capabilities.
-config.sh controller-features reports local capabilities, not negotiated QHS.
-Peer support and radio conditions determine actual QHS/Lossless operation.
+Native activation supports only the exact stock hashes of the selected backend.

@@ -52,6 +52,7 @@ else:
             "set -eu\n"
             f'MODDIR={shlex.quote(str(self.d))}; STATE="$MODDIR/state"; BB="$MODDIR/bb"\n'
             f". {shlex.quote(str(ROOT / 'module/lib/runtime.sh'))}\n"
+            f". {shlex.quote(str(ROOT / 'module/profiles/samsung-sm-s931z-dzif.sh'))}\n"
             'fail() { echo "$*" >&2; exit 1; }\n'
         )
 
@@ -512,9 +513,9 @@ else:
         initial["unrelated.property"] = "preserved [" + entries[4].split()[1] + "]: [literal]"
         self.db.write_text(json.dumps(initial))
         self.run_shell(self.properties + "save_properties")
-        mutated = dict(initial)
-        mutated.update({line.split()[1]: "module" for line in entries})
-        self.db.write_text(json.dumps(mutated))
+        for line in entries:
+            saved = line.split()[0]
+            self.run_shell(self.properties + f"set_managed_property {saved} module")
         self.run_shell(self.properties + "restore_properties")
         self.assertEqual(json.loads(self.db.read_text()), initial)
         self.assertFalse((self.d / "sentinel").exists())
@@ -534,6 +535,69 @@ else:
         self.db.write_text(json.dumps({line.split()[1]: "module" for line in entries}))
         self.run_shell(self.properties + "restore_properties")
         self.assertEqual(json.loads(self.db.read_text()), expected)
+
+    def test_default_profile_preserves_system_priorities_voice_and_logging(self):
+        entries = self.property_fixture()
+        initial = {line.split()[1]: "original" for line in entries}
+        self.db.write_text(json.dumps(initial))
+        (self.d / "payload").mkdir()
+        (self.d / "payload/runtime.prop").write_text(
+            "persist.vendor.qcom.bluetooth.aptxadaptiver2_1_support=true\n"
+        )
+        config = f'. {shlex.quote(str(ROOT / "module/lib/config.sh"))}\nCONFIG_FILE="$MODDIR/missing.conf"; LEGACY_CONFIG="$MODDIR/also-missing.conf"\n'
+        self.run_shell(self.properties + config + "save_properties\nprofile_apply_properties")
+        current = json.loads(self.db.read_text())
+        for saved, property_name, _ in (line.split() for line in entries):
+            if saved not in {"samsung-cap", "r21"}:
+                self.assertEqual(current[property_name], initial[property_name])
+        self.assertEqual(
+            set((self.state / "property-writes").read_text().splitlines()), {"samsung-cap", "r21"}
+        )
+        self.run_shell(self.properties + "restore_properties")
+        self.assertEqual(json.loads(self.db.read_text()), initial)
+
+    def test_recovery_preserves_later_android_property_changes(self):
+        entries = self.property_fixture()
+        initial = {line.split()[1]: "original" for line in entries}
+        self.db.write_text(json.dumps(initial))
+        self.run_shell(self.properties + "save_properties\nset_managed_property ad-priority 4001")
+        changed = json.loads(self.db.read_text())
+        changed[entries[5].split()[1]] = "7001"
+        changed[entries[4].split()[1]] = "user-voice-choice"
+        self.db.write_text(json.dumps(changed))
+        self.run_shell(self.properties + "restore_properties")
+        self.assertEqual(json.loads(self.db.read_text()), changed)
+
+    def test_missing_or_invalid_property_write_journal_is_not_ignored(self):
+        self.property_fixture()
+        self.db.write_text("{}")
+        self.run_shell(self.properties + "save_properties")
+        (self.state / "property-writes").unlink()
+        self.run_shell(self.properties + "restore_properties", ok=False)
+        (self.state / "property-writes").write_text("unknown-property\n")
+        self.run_shell(self.properties + "restore_properties", ok=False)
+        (self.state / "property-writes").write_text("ad-priority\n")
+        self.run_shell(self.properties + "restore_properties", ok=False)
+
+    def test_unchanged_property_is_not_owned_and_duplicate_writes_are_rejected(self):
+        entries = self.property_fixture()
+        property_name = entries[5].split()[1]
+        self.db.write_text(json.dumps({property_name: "4001"}))
+        self.run_shell(self.properties + "save_properties\nset_managed_property ad-priority 4001")
+        self.assertEqual((self.state / "property-writes").read_text(), "")
+        self.run_shell(self.properties + "set_managed_property ad-priority 6001")
+        self.run_shell(self.properties + "set_managed_property ad-priority 7001", ok=False)
+        self.run_shell(self.properties + "restore_properties")
+        self.assertEqual(json.loads(self.db.read_text()), {property_name: "4001"})
+
+    def test_backend_with_no_property_overrides_restores_without_writes(self):
+        self.property_fixture()
+        self.db.write_text('{"system.preference": "user-value"}')
+        self.run_shell(
+            self.properties
+            + "profile_managed_properties() { :; }\nsave_properties\nrestore_properties"
+        )
+        self.assertEqual(json.loads(self.db.read_text()), {"system.preference": "user-value"})
 
     def test_property_restore_failure_is_not_hidden(self):
         self.property_fixture()

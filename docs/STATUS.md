@@ -1,5 +1,7 @@
 # Status
 
+- 0.8.0-test separates shared Android settings/status tools from the Samsung native/runtime backend. Per-device preferences follow Android; legacy connect-time codec replay is removed. Native device support remains restricted to the exact DZIF inputs. Device/reboot/listening validation of this refactor is pending; historical listening results below refer to their named generations.
+
 - 0.7.2-test keeps Adaptive/Lossless on the DSP path when an unrelated LDAC/SSC preference remains enabled. The captured failure used software encoding despite a valid Adaptive/Lossless selection. The patched APK passed 486 executed predicate cases, six on-device codec selections and Developer Options Adaptive/Lossless changes with successful controller offload STARTs. A fresh Adaptive96→Lossless44 replay received successful controller STARTs, and the user confirmed normal audio in both Air6 Pro earbuds with Lossless selected. This does not establish that every switching failure is fixed.
 - 0.7.1-test retains optional QHS enablement and fixes ordinary Android sh compatibility for lifecycle locks.
 - aptX HD: fixed the LL offload trampoline replaying `cmp w8,#3` instead of the stock `#2`, which incorrectly routed HD into the unknown-codec branch and sent an empty controller START. The corrected build passes 40 stock/private ARM64 dispatch cases; BT-B10 now receives a valid HD START with controller status 0. BT-B10 HD indication and normal audio were confirmed by listening at 48 kHz/24-bit.

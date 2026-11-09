@@ -4,4 +4,4 @@
 set -eu
 MODDIR=${0%/*}
 export CLASSPATH="$MODDIR/status.dex"
-exec /data/adb/ksu/bin/busybox timeout 7 app_process /system/bin BtStatus
+exec /data/adb/ksu/bin/busybox timeout 7 app_process /system/bin BtStatus "$MODDIR"

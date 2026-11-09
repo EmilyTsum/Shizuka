@@ -67,9 +67,9 @@ verify_active_payloads() {
  check_payloads
  live_bt=$(host_bt || true)
  [ -n "$live_bt" ] && saved_process_matches bt "$live_bt" || fail 'STALE: Bluetooth process changed; use Action to repair'
- live_hal=$(getprop init.svc_debug_pid.vendor.audio-hal-aidl)
+ live_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
  [ -n "$live_hal" ] && saved_process_matches hal "$live_hal" || fail 'STALE: audio HAL process changed; use Action to repair'
- verify_live_file "$live_bt" "$NATIVE" patched-libbluetooth_jni.so
- verify_live_file "$live_bt" "$APK" patched-Bluetooth.apk
- verify_live_file "$live_hal" "$HAL" patched-libsehbluetooth_audio_session_aidl.so
+ verify_live_file "$live_bt" "$NATIVE" "$NATIVE_PAYLOAD"
+ verify_live_file "$live_bt" "$APK" "$APK_PAYLOAD"
+ verify_live_file "$live_hal" "$HAL" "$HAL_PAYLOAD"
 }

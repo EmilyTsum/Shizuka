@@ -5,11 +5,13 @@ set -eu
 MODDIR=${0%/*}
 BB=/data/adb/ksu/bin/busybox
 D="$MODDIR/state/qhs-nvm"
-T=/vendor/firmware/hmtnv20.b39
-F=/vendor/firmware/hmtbtfw20.tlv
-ORIG=16c68fb73417b926ad40c2a42a7e3ff9be78db45aa81fddb31fcb069991fb0a6
-TEST=4aee484bfa15d22918053caaa13241f3a39463493de26b28779b70e84c7d4028
-FW=ff39d6a312648e64f81c933f324c2858c6bb1ee93a71d5440604e2230379fb37
+fail() { echo "qhs-nvm: $*" >&2; exit 1; }
+. "$MODDIR/lib/device.sh"
+T=$QHS_NVM_PATH
+F=$QHS_FIRMWARE_PATH
+ORIG=$QHS_NVM_ORIGINAL
+TEST=$QHS_NVM_PATCHED
+FW=$QHS_FIRMWARE_SHA
 bad() { echo "qhs-nvm: $*" >&2; exit 1; }
 sha() { "$BB" sha256sum "$1" | "$BB" awk '{print $1}'; }
 secure_dir() {
@@ -51,8 +53,8 @@ exec 8> "$D/lock"
 [ "$(sha "$F")" = "$FW" ] || bad 'unsupported controller firmware'
 case "${1:-}" in
  apply)
-  [ "$(getprop persist.vendor.qcom.bluetooth.soc)" = hamilton ] || bad 'unsupported SoC'
-  p=$(getprop init.svc_debug_pid.vendor.bluetooth-aidl-qti)
+  [ "$(getprop persist.vendor.qcom.bluetooth.soc)" = "$QHS_SOC" ] || bad 'unsupported SoC'
+  p=$(getprop "$QHS_HAL_PID_PROPERTY")
   case "$p" in ''|*[!0-9]*)bad 'controller HAL unavailable';;esac
   [ "$(readlink /proc/$p/ns/mnt)" = "$(readlink /proc/1/ns/mnt)" ] || bad 'controller HAL namespace differs'
   mid=$(mount_id)
@@ -68,8 +70,7 @@ case "${1:-}" in
   trap 'rm -rf "$tmp"' EXIT
   trap 'exit 1' HUP INT TERM
   "$BB" cp "$T" "$tmp/candidate"
-  printf '\003' | "$BB" dd of="$tmp/candidate" bs=1 seek=3817 conv=notrunc 2>/dev/null
-  printf '\001' | "$BB" dd of="$tmp/candidate" bs=1 seek=3953 conv=notrunc 2>/dev/null
+  profile_prepare_qhs_candidate "$tmp/candidate"
   [ "$(sha "$tmp/candidate")" = "$TEST" ] || bad 'candidate mismatch'
   chmod 0444 "$tmp/candidate"; chcon u:object_r:vendor_firmware_file:s0 "$tmp/candidate"
   mv "$tmp/candidate" "$D/candidate"

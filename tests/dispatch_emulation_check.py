@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Execute actual stock/current AArch64 dispatch prefixes; no copied CMP policy.
 Usage: python tests/dispatch_emulation_check.py [PRISTINE_LIB BUILT_PATCHED_LIB]
-Defaults use S25_BASE_BIN (or inputs/) and build/patched-libbluetooth_jni.so.
+Defaults use SHIZUKA_BASE_BIN (or inputs/) and build/patched-libbluetooth_jni.so.
 Requires pyelftools and Unicorn. Does not modify either input.
 """
 
@@ -10,11 +10,14 @@ import argparse
 import hashlib
 import io
 import json
-import os
 import struct
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
 from elftools.elf.elffile import ELFFile
+from shizuka.project import inputs_dir
 from unicorn import UC_ARCH_ARM64, UC_HOOK_CODE, UC_MODE_ARM, Uc
 from unicorn.arm64_const import UC_ARM64_REG_W8
 
@@ -146,7 +149,7 @@ if __name__ == "__main__":
         "stock",
         nargs="?",
         type=Path,
-        default=Path(os.environ.get("S25_BASE_BIN", str(root / "inputs"))) / "libbluetooth_jni.so",
+        default=inputs_dir() / "libbluetooth_jni.so",
     )
     p.add_argument(
         "patched", nargs="?", type=Path, default=root / "build/patched-libbluetooth_jni.so"
