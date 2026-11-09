@@ -6,17 +6,17 @@ The included native backend supports **SM-S931Z / S931ZSCU1DZIF only**, with exa
 
 ## Settings
 
-Use Android Bluetooth Settings and Developer Options for codec/device preferences. Optional extension settings live in `/data/adb/shizuka/config.conf`; no file is required for defaults. QHS and technical property overrides are described in [SETTINGS.md](docs/SETTINGS.md). Legacy configuration is read for extension controls, while old per-device preferences are ignored.
+KernelSU **Action opens the native Shizuka settings app**, built with [OneUIProject](https://github.com/OneUIProject/oneui-design). The English interface shows Android playback selection, additional TTP requests, DSP observations, and opt-in diagnostic capture/export. See [the app guide](docs/NATIVE-SETTINGS.md).
 
-The KernelSU WebUI shows the current media route and Android codec selection. Lossless selection does not confirm actual lossless transmission. Historical measurements and known issues are in [STATUS.md](docs/STATUS.md) and [QHS.md](docs/QHS.md).
+The app and external callers share one-shot Android preferences through `playback.sh`, typed tuning through `config.sh`, and `status.sh` / `diagnostics.sh`. Opening the app does not restart Bluetooth or install a DSP experiment. Module activation is an explicit operation through `apply.sh`. Optional extension settings live in `/data/adb/shizuka/config.conf`.
 
-Opt-in [DSP diagnostics](docs/DIAGNOSTICS.md) exports raw/structured encoder observations. The shared [control API](docs/CONTROLS.md) exposes capabilities, saved tuning intent and codec/mode plans. The screen is provisional and independent of a future One UI design. This acquisition path has not been tested on a phone.
+Lossless selection is separate from the observed encoder state and receiver bit-perfect playback. DSP capture is opt-in and expires; old captures are available as history, not live status. Additional TTP requests are **saved only** on DZIF: the DSP rejects modified encoder signatures. `config.sh tuning availability` exposes this limitation. Existing playback modes continue to use the stock signed DSP.
 
-The optional, offline [Adaptive HQ/Lossless and Adaptive LL TTP experiment](docs/TTP-TRIAL.md) has independent integer increments (HQ/Lossless 0..150 ms, Adaptive LL 0..100 ms; step 1). Typed controls and device/provider contexts share one definition catalog; exact-image DSP implementations are separate backends. The included implementation targets the verified DZIF image. It is excluded from normal module payloads and has no automatic device activation; receiver/audio validation is pending.
+The optional, offline [Adaptive HQ/Lossless and Adaptive LL TTP experiment](docs/TTP-TRIAL.md) has independent integer increments (HQ/Lossless 0..150 ms, Adaptive LL 0..100 ms; step 1). Typed controls and device/provider contexts share one definition catalog; exact-image DSP implementations are separate backends. The included implementation targets the verified DZIF image. It is excluded from normal module payloads and has no automatic device activation; the device loader rejected the modified candidates before execution. Offline instruction results do not establish runtime support.
 
 ## Build
 
-Requirements: Python 3.10+, a host C++17 compiler, JDK 17+ with JNI headers, Android SDK platform 35/build-tools 35.0.0, and NDK 26.1.10909125. The Samsung APK backend also requires apktool 3.0.3.
+Requirements: Python 3.10+, a host C++17 compiler, JDK 17+ with JNI headers, Android SDK platform 35/build-tools 35.0.0, and NDK 26.1.10909125. The Samsung APK backend also requires apktool 3.0.3. The companion app uses Gradle 8.10.2, AGP 8.7.3, and pinned OneUIProject Maven dependencies (JDK 17).
 
 Place unmodified stock files listed in [the device profile](profiles/samsung-sm-s931z-dzif/profile.json) in `inputs/`. Proprietary APKs/libraries are excluded from this repository.
 
@@ -29,7 +29,7 @@ pip install -r requirements.txt
 python tools/build_all.py
 ```
 
-Output: `dist/Shizuka-samsung-sm-s931z-dzif-0.9.0-test.zip`. Install through KernelSU, then use Action. New archives have no inherited audio proof and start as a 15-minute trial with automatic rollback. Manual restoration:
+Output: `dist/Shizuka-samsung-sm-s931z-dzif-0.10.0-test.zip`. Install through KernelSU, then use Action to open settings. Explicit activation of unverified native payloads starts a 15-minute trial with automatic rollback. Manual restoration:
 
 ```sh
 su -c 'sh /data/adb/modules/s25_aptx_adaptive/control.sh rollback'

@@ -18,10 +18,20 @@ final class DspLogDecoder {
     private double last = -1, encoderTime = -1;
     private long epoch, records, packet = -1;
     private String resetReason = "capture start";
+    private double loadErrorTime = -1;
+    private String loadError;
     private void reset(String reason) {
         fields.clear(); packet = -1; encoderTime = -1; epoch++; resetReason = reason;
+        loadErrorTime = -1; loadError = null;
     }
-    void contextChanged(String reason) { reset(reason); }
+    void contextChanged(String reason) {
+        // Route fallback is often caused by the load failure itself. Preserve the
+        // independent loader event until it expires or a new encoder initializes.
+        String previousError = loadError;
+        double previousTime = loadErrorTime;
+        reset(reason);
+        loadError = previousError; loadErrorTime = previousTime;
+    }
     private void put(String key, Object value, String unit, String source, double time) {
         if (key.length() > 80 || (!fields.containsKey(key) && fields.size() >= 80)) return;
         fields.put(key, new Field(value, unit, source, time));
@@ -47,6 +57,18 @@ final class DspLogDecoder {
             throw new IllegalArgumentException("invalid DSP observation");
         if (last >= 0 && time < last) reset("observation clock moved backwards");
         last = time;
+        // A rejected library is a loader observation, never proof of a running encoder.
+        // Match the module name so another DSP library cannot invalidate this encoder.
+        if (text.contains("aptx_adaptive_enc_module.so.1") &&
+            (text.contains("SigVerify") || text.contains("dlopen_ex failed"))) {
+            boolean signature = text.contains("SigVerify");
+            if (signature || !"signature_verification_failed".equals(loadError)) {
+                reset("encoder module load failed");
+                loadError = signature ? "signature_verification_failed" : "module_load_failed";
+            }
+            loadErrorTime = time;
+            return;
+        }
         if (!(text.contains("APTX") || text.contains("aptx") || text.contains("hQLatTarget0") || text.contains("Shizuka TTP") ||
             text.contains("IMCL_PARAM_ID_BT_SIDEBAND_ENCODER_FEEDBACK") || text.contains("COP_SIDEBAND_ID_ENCODER_FEEDBACK"))) return;
         records++;
@@ -137,9 +159,17 @@ final class DspLogDecoder {
                 "fresh", age >= 0 && (epochField || age <= FRESH_SECONDS)));
         }
         double age = now - encoderTime;
-        return ControlJson.object("schema", 2, "available", encoderTime >= 0 && age >= 0 && age <= FRESH_SECONDS,
+        Map<String, Object> result = ControlJson.object("schema", 2, "available", encoderTime >= 0 && age >= 0 && age <= FRESH_SECONDS,
             "monotonic_s", encoderTime, "fields", values, "epoch", epoch, "epoch_reason", resetReason,
             "recognized_records", records, "receiver_bit_perfect", "Unverified",
             "clock", "APSS CLOCK_MONOTONIC observation; not DSP generation or receiver playout");
+        if (loadError != null) result.put("loader", ControlJson.object("code", loadError,
+            "message", "signature_verification_failed".equals(loadError)
+                ? "The DSP rejected the modified encoder signature. Restore the signed stock image."
+                : "The DSP could not load the Adaptive encoder module.",
+            "monotonic_s", loadErrorTime, "age_seconds", now - loadErrorTime,
+            "fresh", now >= loadErrorTime && now - loadErrorTime <= FRESH_SECONDS,
+            "source", "DSP dynamic-loader log"));
+        return result;
     }
 }

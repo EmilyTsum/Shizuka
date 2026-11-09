@@ -1,21 +1,7 @@
 #!/system/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-# Idempotent apply/repair. Unheard generations get a bounded trial, never a fake audio proof.
+# KernelSU Action opens the native settings app without changing audio routing.
 set -eu
 MODDIR=${0%/*}
 BB=/data/adb/ksu/bin/busybox
-STATE="$MODDIR/state"
-. "$MODDIR/lib/runtime.sh"
-rm -f "$MODDIR/.no-auto"
-if [ ! -f "$MODDIR/proofs/verified-payloads.sha256" ] || ! "$BB" cmp -s "$MODDIR/payloads.sha256" "$MODDIR/proofs/verified-payloads.sha256";then
- if recovery_pending;then
-  if [ -f "$STATE/active" ];then "$BB" sh "$MODDIR/control.sh" status && exit 0;fi
-  "$BB" sh "$MODDIR/control.sh" rollback
- fi
- "$BB" sh "$MODDIR/control.sh" preflight
- "$BB" sh "$MODDIR/control.sh" activate 900
- echo 'Audio verification pending: 15-minute trial. Automatic rollback remains armed.'
-else
- "$BB" sh "$MODDIR/boot-activate.sh" manual
-fi
-"$BB" sh "$MODDIR/control.sh" status
+exec "$BB" sh "$MODDIR/settings.sh"

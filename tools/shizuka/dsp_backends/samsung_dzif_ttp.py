@@ -211,7 +211,42 @@ def compile_patch(delta_ms, llvm_mc, linker, ll_delta_ms=0):
         return pieces
 
 
-def patch_verified(data, delta_ms, pieces, ll_delta_ms=0):
+def add_code_section(data, end):
+    """Describe injected executable bytes to both segment- and section-based DSP loaders."""
+    if not CAVE < end <= len(data):
+        raise ValueError("Injected section extends outside its file-backed code")
+    original = ELFFile(io.BytesIO(data))
+    count, size = original["e_shnum"], original["e_shentsize"]
+    if size != 40 or not count:
+        raise ValueError("Unexpected ELF32 section table")
+    strings = original.get_section(original["e_shstrndx"]).data()
+    name = len(strings)
+    new_strings = strings + b".shizuka.ttp\0"
+    result = bytearray(data)
+    strings_at = len(result)
+    result.extend(new_strings)
+    result.extend(bytes((-len(result)) % 4))
+    table_at = len(result)
+    headers = bytearray(data[original["e_shoff"] : original["e_shoff"] + count * size])
+    entry = original["e_shstrndx"] * size
+    struct.pack_into("<II", headers, entry + 16, strings_at, len(new_strings))
+    headers.extend(struct.pack("<10I", name, 1, 6, CAVE, CAVE, end - CAVE, 0, 0, 4, 0))
+    result.extend(headers)
+    struct.pack_into("<I", result, 32, table_at)
+    struct.pack_into("<H", result, 48, count + 1)
+    check = ELFFile(io.BytesIO(result))
+    section = check.get_section_by_name(".shizuka.ttp")
+    if (
+        section is None
+        or section["sh_flags"] != 6
+        or section["sh_addr"] != CAVE
+        or section["sh_size"] != end - CAVE
+    ):
+        raise ValueError("Injected code section is not allocated/executable")
+    return result
+
+
+def patch_verified(data, delta_ms, pieces, ll_delta_ms=0, layout="allocated_section_v1"):
     """Recheck every gate even when called outside the command-line builder."""
     baseline = inspect_stock(data)
     validate_increments(delta_ms, ll_delta_ms)
@@ -243,7 +278,13 @@ def patch_verified(data, delta_ms, pieces, ll_delta_ms=0):
         raise ValueError("Diagnostic label does not fit")
     result[LOG_OFFSET : LOG_OFFSET + len(LOG)] = label.ljust(len(LOG), b"\0")
     allowed.append([LOG_OFFSET, LOG_OFFSET + len(LOG)])
-    if len(result) != len(data) or any(
+    if layout == "allocated_section_v1":
+        original_length = len(result)
+        result = add_code_section(result, end)
+        allowed.extend([[32, 36], [48, 50], [original_length, len(result)]])
+    elif layout != "legacy_padding":
+        raise ValueError("Unsupported DSP image layout")
+    if any(
         not any(start <= index < stop for start, stop in allowed)
         for index, (old, new) in enumerate(zip(data, result))
         if old != new
@@ -262,8 +303,12 @@ def patch_verified(data, delta_ms, pieces, ll_delta_ms=0):
         "target_words_changed": False,
         "installed": False,
         "audio_verified": False,
+        "runtime_load_supported": False,
+        "runtime_blocker": "DZIF streamed signature verification rejects modified encoder segments",
         "receiver_delay_verified": False,
     }
+    if layout != "legacy_padding":
+        manifest["layout"] = layout
     if ll_delta_ms:
         manifest["adaptive_ll_delta_ms"] = ll_delta_ms
         manifest["states"] = ([3, 7] if delta_ms else []) + [2, 6]

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="OneUITheme">
+        <item name="colorPrimary">#9AB9FF</item>
+        <item name="colorAccent">#9AB9FF</item>
+    </style>
+</resources>

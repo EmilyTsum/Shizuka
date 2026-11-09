@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """The experimental builder must refuse unknown input before invoking any tools."""
 
+import io
+import struct
 import sys
 import tempfile
 import unittest
@@ -46,6 +48,34 @@ class TtpTrialGuards(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Invalid"):
                     ttp.compile_patch(0, "not-run", "not-run", value)
             run.assert_not_called()
+
+    def test_injected_code_has_file_backed_allocated_executable_section(self):
+        # A small ELF32/Hexagon fixture checks image metadata independently of
+        # the instruction harness, which has its own executable sections.
+        end = ttp.CAVE + 64
+        strings = b"\0.shstrtab\0"
+        section_table = (end + len(strings) + 3) & ~3
+        image = bytearray(section_table + 80)
+        image[:16] = b"\x7fELF\x01\x01\x01" + bytes(9)
+        struct.pack_into(
+            "<HHIIIIIHHHHHH", image, 16, 3, 164, 1, 0, 52, section_table, 0, 52, 32, 1, 40, 2, 1
+        )
+        struct.pack_into("<8I", image, 52, 1, 0, 0, 0, end, end, 5, 4096)
+        image[ttp.CAVE : end] = bytes(range(64))
+        image[end : end + len(strings)] = strings
+        struct.pack_into(
+            "<10I", image, section_table + 40, 1, 3, 0, 0, end, len(strings), 0, 0, 1, 0
+        )
+        result = ttp.add_code_section(image, end)
+        elf = ttp.ELFFile(io.BytesIO(result))
+        section = elf.get_section_by_name(".shizuka.ttp")
+        self.assertEqual(section["sh_flags"], 6)
+        self.assertEqual(section["sh_addr"], ttp.CAVE)
+        self.assertEqual(section.data(), bytes(range(64)))
+        self.assertLessEqual(section["sh_addr"] + section["sh_size"], elf.get_segment(0)["p_memsz"])
+        self.assertEqual(elf["e_shnum"], 3)
+        with self.assertRaises(ValueError):
+            ttp.add_code_section(image, len(image) + 1)
 
     def test_existing_output_is_never_replaced(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -9,7 +9,7 @@ root = Path(__file__).resolve().parents[1]
 
 
 def main():
-    for script in ("build_android.py", "verify_offline.py", "package.py"):
+    for script in ("build_android.py", "build_settings_app.py", "verify_offline.py", "package.py"):
         subprocess.run([sys.executable, str(root / "tools" / script)], check=True)
 
 

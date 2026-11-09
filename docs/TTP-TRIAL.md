@@ -2,15 +2,48 @@
 
 The [shared control API](CONTROLS.md) can now generate a versioned plan for this
 builder. [Opt-in diagnostics](DIAGNOSTICS.md) provides a path for collecting the
-existing target/TTP/state logs once device validation is available. Saved intent
-still does not install or hot-apply a candidate.
+existing target/TTP/state logs. Saved intent does not install or hot-apply a
+candidate.
 
-Status: offline candidates only. Nothing is mounted automatically, and these
-DSP images are **not included in the KernelSU module**. The user deferred
-listening on 2026-11-09. The connected phone still uses its unmodified DSP image;
-its snapshot had no connected audio device, so fresh three-mode baselines could
-not be collected. Loader acceptance, live TTP, receiver delay, poor-link pops and
-long playback remain unverified. Do not call this an audio-quality fix.
+Status on 2026-11-09: **the DZIF DSP loader rejects the modified image during
+signature verification**. The +150 ms candidate did not execute and has no
+successful listening or latency evidence. The original DSP was restored.
+These DSP images are not included in the normal KernelSU module. New DZIF
+trial requests are refused before mounting, with the signature limitation as
+the reason. Arithmetic candidates remain available for offline analysis.
+
+The tuning API retains saved integer intent and plan generation, but reports
+`runtime_apply_supported: false`. `config.sh tuning availability` exposes the
+reason. A saved value of 150 with `applied: false` is not an active +150 ms
+setting. Do not call this an audio-quality fix.
+
+## Confirmed loader rejection and recovery
+
+The allocated-section +150 ms / LL0 candidate has SHA-256
+`cdb67b33ae62e67e4d3cb160870c2c24eaa860fb750426ae8b2e41ca872f0646`.
+In capture session `db6abca9-72d0-4529-8f8d-cb7c2fcce60d`, taken after confirming
+the Air6 Pro connection and codec context, the raw DSP ring repeatedly reported:
+
+```text
+ADSP:[AS]: Streaming Hash Finalize error
+ADSP:[AS]: Segment [0] failed to read or streamed SigVerify for aptx_adaptive_enc_module.so.1
+ADSP:[AS]: Error: dlopen_ex failed for aptx_adaptive_enc_module.so.1 (flags 2)
+```
+
+The local investigation retains the raw capture as
+`retry-sections-raw.jsonl`. This is a loader rejection before the injected
+instructions run. Correct ELF section metadata and passing instruction tests
+do not establish that a signed DSP image can be replaced. Earlier failed trials
+also produced host graph-open errors and speaker output; those observations
+alone did not identify the cause. An earlier accounting-observer trial using
+the same original DSP image had also recorded streamed signature rejection.
+
+Recovery restored the original DSP SHA-256
+`05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3`.
+The restored native/APK/HAL payload hashes match the previously heard 0.9.2
+stock-DSP generation, so its exact-payload proof can retain that normal
+session. That proof does not cover any +150 ms DSP candidate. No signing or
+verification bypass is implemented.
 
 ## What the exact phone image establishes
 
@@ -35,15 +68,42 @@ inspected `aptx_adaptive_enc.cfg` callback handles `global_settings` /
 `override_quality`, not an HQ latency target. Incoming PROFILE timing fields are
 deprecated/ignored on this build; increasing maxHQ alone is ineffective.
 
-## Trial behavior
+## Host configuration limits on the signed image
+
+There is an accepted HQ minimum request, but it is not an arbitrary additional
+TTP control. `AdaptiveConfig.buffering[2]` is passed through the Samsung offload
+configuration and `lib_bt_aptx.so`'s `aptx_ad_pack_enc_config`
+(`0x6a8c..0x6be8`) into DSP INIT parameter `0x08001183` (59-byte payload).
+In the exact DSP image, `aptx_adaptive3_enc_set_param` at
+`0xfd1c..0xfd70` reads payload `+0x14` into `ctx+0x42b0`; at
+`0xfdd0..0xfde4`, the internal HQ maximum (`ctx+0x42b4`, default 200 ms)
+clamps that minimum. `calcTTPAdj` at `0x14f14..0x14f8c` uses the resulting
+minimum in its floor calculation, with a further 10 ms term. This can affect
+the existing policy floor; it cannot supply an independent +150 ms on top of
+the observed roughly 187..202 ms adjustments. It also does not prove a larger
+receiver buffer or better audio.
+
+The inspected INIT explicitly ignores the LL minimum/maximum requests.
+PROFILE parameter `0x08001184` is deprecated; successful host serialization
+does not make its timing fields effective. The configuration-file callback
+does not accept a TTP target. The host latency-mode API selects modes rather
+than an integer millisecond offset. No supported host path for arbitrary,
+independent HQ/Lossless/Adaptive-LL increments has been established on DZIF.
+
+The HQ target words are both 70: legacy initialization writes at
+`0x25c8` / `0x25d0`, and R3 initialization at `0xb1d0` / `0xb1e0`.
+Do not infer a target of 94 from an adjacent register assignment: stores in
+the same Hexagon packet use the old value without `.new`.
+
+## Offline candidate behavior
 
 The experiment adds independent bounded increments to calculated Adaptive HQ
 and Adaptive LL adjustments. Bitrate/frame-size tables and encoder modes remain
-unchanged. Controls accept integer HQ 0..150 ms / LL 0..100 ms (step 1); 50/100 remain useful
-comparison stages. Domains and supported contexts are declared in
+unchanged in the offline model. Saved controls accept integer HQ 0..150 ms /
+LL 0..100 ms (step 1). Domains and modeled contexts are declared in
 `config/tuning.json`, not embedded in the common planner.
 
-| Selection | Effect |
+| Selection | Arithmetic effect in the offline candidate |
 | --- | --- |
 | `--delta-ms 0` | Byte-identical stock control image |
 | `--delta-ms 50` | Add 50,000 us in HQ states 3 / 7 |
@@ -52,14 +112,15 @@ comparison stages. Domains and supported contexts are declared in
 | Both increments zero | Byte-identical stock image |
 | Other states | Preserve the stock result |
 
-The hook runs in shared `calcTTPAdj` after the stock clamps and the
+The candidate hook targets shared `calcTTPAdj` after the stock clamps and the
 lossless-capable floor, before the existing diagnostic log and 8-us packing.
 This intentionally shifts the scheduling adjustment beyond the stock policy
 range for the trial; it does **not** raise an internal target word or establish
 a larger receiver buffer. Adaptive HQ (including 96 kHz) and Lossless HQ share
 this path; actual state 3/7 must be confirmed for each tested stream. Adaptive
 LL uses the independent state 2/6 path. Adding LL scheduling margin increases
-latency without selecting HQ. Separate aptX LL and LC3 are different encoders.
+latency in the model without selecting HQ. Loader rejection prevents this from
+being a runtime claim. Separate aptX LL and LC3 are different encoders.
 
 The guard includes the subsequent state term (`ctx+0x6494 * 1000 us`) when
 checking the unsigned 16-bit wire limit of 524,280 us. If the addition cannot fit,
@@ -109,35 +170,20 @@ preserved registers and return. The Linux exit stub follows the
 [QEMU Hexagon test startup convention](https://github.com/qemu/qemu/blob/master/tests/tcg/hexagon/crt.S).
 This verifies instruction behavior, not the DSP loader, receiver or audio.
 
-## Device experiment still required
+## Runtime boundary
 
-Before the first mount, collect fresh HQ 44.1 kHz, HQ 96 kHz/24-bit and Lossless
-44.1 kHz baselines. Record the actual state, target word, final state term and
-calculated adjustment with units. Compiled defaults or old captures must not be
-reported as these measurements. A fresh diagnostic target-word observation is
-still needed; this candidate's log alone does not provide it.
+The former private one-shot DSP mounting path is disabled for new DZIF trial
+requests because the signed loader rejected the candidate. Existing experiment
+recovery remains available so rollback can unmount a previously active trial,
+restart the DSP loader and rebuild the stock audio graph. Saving tuning intent,
+normal boot and standard activation do not stage DSP images.
 
-Any later activation must recheck the exact firmware and live DSP hash, close
-the old encoder graph, and use an owned, reversible bind mount in the loader's
-mount namespace. Do not write a partition, stack onto an unknown mount, change
-SELinux policy, reuse old listening proof or make this a boot default. A bind
-mount by itself does not replace a DSP image already loaded in a running graph.
-Verify a new graph's diagnostic marker and calculated TTP after loading, and
-restore the stock file **and a fresh stock graph** after each timed trial.
-Since 0.9.2, the DZIF runtime backend can consume an explicit, private one-shot
-DSP request. Its mount joins the module lifecycle journal; ordinary manual,
-trial and health rollback unmount it and restart the DSP loader before rebuilding
-the stock audio graph. Standard activation does not infer this request from
-saved tuning intent.
-
-Trial order is stock → +50 → stock → +100 → stock, on the same music and device
-settings. Record HQ44.1 and Lossless44.1 pop count/period and long playback,
-including a reproducible poor-link condition. Use measured receiver PCM/playout
-delay or a repeatable acoustic impulse correlation to show whether receiver
-buffering responds. The phone-side arithmetic or an already stable radio link
-cannot establish this. QHS is kept as its existing, separately verified opt-in;
-this experiment does not force encoder bitrate/quality or prove a downstream
-QHS effect. Cold reboot → DFRoot → KernelSU remains a separate open check.
+Further work must first establish an accepted configuration path. Repeating
+the same image modifications at 0/50/100/150 ms cannot resolve signature
+verification. If an accepted path is found, fresh target/state/TTP measurements
+and receiver or acoustic timing are still needed to assess actual delay, pops
+and audio quality. QHS observations and prior stock listening are separate
+evidence. Cold reboot → DFRoot → KernelSU also remains a separate open check.
 
 ## 0.9.1 offline validation
 
@@ -147,8 +193,8 @@ values. Their actual instruction bytes passed 473,088 vectors in a Linux QEMU
 VM running locally on the same Mac. Checks cover state separation, both debug
 branches, signed/large inputs, exact ceilings, final state terms and preserved
 registers. All eight prior non-stock 0/50/100 image hashes reproduce exactly.
-This is firmware instruction/ABI evidence; loader acceptance and audible results
-remain separate device tests. The standard module still ships no DSP trial.
+This is firmware instruction/ABI evidence; the later device trial failed loader
+acceptance, so it adds no audible result. The standard module ships no DSP trial.
 
 Common dispatch and schema compatibility are in `tools/shizuka/ttp.py`.
 Addresses, image gates and instruction generation are isolated in
@@ -157,7 +203,7 @@ oracle is in `samsung_dzif_verify.py`. Another firmware must register its own
 verified implementation. The shared planner and persistence need no new device
 branch to expose another provider or integer control.
 
-## Explicit +150 ms device trial (0.9.2)
+## Historical +150 ms candidate and activation design (0.9.2)
 
 HQ/Lossless accepts 0..150 ms; Adaptive LL remains 0..100 ms. The +150/LL0
 candidate is SHA-256
@@ -165,17 +211,9 @@ candidate is SHA-256
 Another 100 candidates (HQ 101..150 with LL0/100) passed 234,336 actual-byte
 vectors on the Mac-local VM. This validates arithmetic/ABI, not audible quality.
 
-After offline verification, root can stage an approved candidate as a read-only,
-root-owned file at `/data/adb/shizuka/dsp-trials/trial-UUID/aptx_adaptive_enc_module.so.1`.
-All three private directories must be root-owned mode 0700, and the file mode
-0444. The explicit module `state/dsp-trial.request` is root-owned mode 0600 and
-contains exactly `BOOT_UUID SHA256 ABSOLUTE_CANDIDATE_PATH` on one line. Another
-boot retires the request without applying it. This is an experimental internal
-activation boundary, not an arbitrary-image or unverified firmware loader.
-
-During activation the generic lifecycle calls an optional backend hook after
-Bluetooth is OFF. The backend rechecks the original image and approved candidate,
-journals before mounting in init's namespace, resets the DSP loader, confirms
-the new loader sees the candidate, and consumes the request. The existing timed
-module rollback remains armed. Missing requests do nothing. Saving a tuning
-value, normal boot or standard activation alone never stages a DSP image.
+Version 0.9.2 introduced private, root-owned one-shot staging, an owned mount
+journal and timed rollback. Those checks established file publication and
+recovery, not DSP acceptance. The later allocated-section candidate retained
+the arithmetic but still failed streamed signature verification. The current
+backend refuses a new request before a mount is created; the former staging
+format is not an available runtime application API.

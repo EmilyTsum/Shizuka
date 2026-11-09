@@ -33,6 +33,10 @@ while [ "$elapsed" -lt 180 ];do
 done
 [ "$ready" = 1 ] || { echo 'No stable Bluetooth-enabled host session; skipped';exit 0; }
 if [ -f "$STATE/active" ] && [ -f "$STATE/bt.pid" ] && [ "$(cat "$STATE/bt.pid")" = "$bt" ];then
+ if [ -e "$STATE/experiment-unverified" ];then
+  echo 'Device experiment verification pending; automatic rollback remains armed.'
+  exit 0
+ fi
  if "$BB" sh "$MODDIR/control.sh" keep-verified;then exit 0;fi
 fi
 if [ "${1:-}" != manual ] && [ -f "$STATE/boot-attempt" ] && [ "$(cat "$STATE/boot-attempt")" = "$session" ];then
@@ -45,4 +49,8 @@ if recovery_pending;then
 fi
 "$BB" sh "$MODDIR/control.sh" preflight
 "$BB" sh "$MODDIR/control.sh" activate
-"$BB" sh "$MODDIR/control.sh" keep-verified
+if [ -e "$STATE/experiment-unverified" ];then
+ echo 'Device experiment verification pending; automatic rollback remains armed.'
+else
+ "$BB" sh "$MODDIR/control.sh" keep-verified
+fi
