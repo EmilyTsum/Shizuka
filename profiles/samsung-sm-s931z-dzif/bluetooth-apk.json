@@ -85,6 +85,23 @@
           "insert": "    invoke-virtual {p0, p1}, Lcom/android/bluetooth/a2dp/A2dpService;->getCodecStatus(Landroid/bluetooth/BluetoothDevice;)Landroid/bluetooth/BluetoothCodecStatus;\n\n    move-result-object v0\n\n    if-eqz v0, :s25_hq_stock\n\n    invoke-virtual {v0}, Landroid/bluetooth/BluetoothCodecStatus;->getCodecConfig()Landroid/bluetooth/BluetoothCodecConfig;\n\n    move-result-object v0\n\n    if-eqz v0, :s25_hq_stock\n\n    invoke-virtual {v0}, Landroid/bluetooth/BluetoothCodecConfig;->getCodecType()I\n\n    move-result v0\n\n    const/4 v1, 0x7\n\n    if-eq v0, v1, :s25_hq_proxy\n\n    const/16 v1, 0xc\n\n    if-ne v0, v1, :s25_hq_stock\n\n    :s25_hq_proxy\n    const/4 v0, 0x0\n\n    return v0\n\n    :s25_hq_stock\n"
         }
       ]
+    },
+    {
+      "path": "smali/com/android/bluetooth/le_audio/LeAudioService.smali",
+      "before_sha256": "f0ca37bb5ebdfdc49029fe0b2117252797a0cfaa22655b07e680f2e0dbee13e0",
+      "after_sha256": "375c68d383a284f69a051832abb7c6c8134a10515f4cc2ed4c256f8fa5602001",
+      "edits": [
+        {
+          "line": 27269,
+          "delete": 0,
+          "insert": ".method private s25PrepareClassicHandoff(Landroid/bluetooth/BluetoothDevice;)V\n    .locals 3\n\n    if-eqz p1, :s25_handoff_done\n\n    iget-object v0, p0, Lcom/android/bluetooth/le_audio/LeAudioService;->mAudioManager:Landroid/media/AudioManager;\n\n    invoke-virtual {v0}, Landroid/media/AudioManager;->getMode()I\n\n    move-result v0\n\n    if-nez v0, :s25_handoff_done\n\n    iget-object v0, p0, Lcom/android/bluetooth/le_audio/LeAudioService;->mActiveAudioOutDevice:Landroid/bluetooth/BluetoothDevice;\n\n    if-eqz v0, :s25_handoff_done\n\n    invoke-virtual {p0, v0}, Lcom/android/bluetooth/le_audio/LeAudioService;->getGroupId(Landroid/bluetooth/BluetoothDevice;)I\n\n    move-result v0\n\n    invoke-virtual {p0, p1}, Lcom/android/bluetooth/le_audio/LeAudioService;->getGroupId(Landroid/bluetooth/BluetoothDevice;)I\n\n    move-result v1\n\n    if-ne v0, v1, :s25_handoff_done\n\n    const/4 v1, -0x1\n\n    if-eq v0, v1, :s25_handoff_done\n\n    invoke-virtual {p0}, Lcom/android/bluetooth/profile/ProfileService;->getAdapterService()Lcom/android/bluetooth/btservice/AdapterService;\n\n    move-result-object v0\n\n    invoke-virtual {v0}, Lcom/android/bluetooth/btservice/AdapterService;->getA2dpService()Ljava/util/Optional;\n\n    move-result-object v0\n\n    invoke-virtual {v0}, Ljava/util/Optional;->isEmpty()Z\n\n    move-result v1\n\n    if-nez v1, :s25_handoff_done\n\n    invoke-virtual {v0}, Ljava/util/Optional;->get()Ljava/lang/Object;\n\n    move-result-object v0\n\n    check-cast v0, Lcom/android/bluetooth/a2dp/A2dpService;\n\n    invoke-virtual {v0, p1}, Lcom/android/bluetooth/a2dp/A2dpService;->getConnectionPolicy(Landroid/bluetooth/BluetoothDevice;)I\n\n    move-result v1\n\n    const/16 v2, 0x64\n\n    if-ne v1, v2, :s25_handoff_done\n\n    invoke-virtual {v0, p1}, Lcom/android/bluetooth/a2dp/A2dpService;->getConnectionState(Landroid/bluetooth/BluetoothDevice;)I\n\n    move-result v1\n\n    const/4 v2, 0x2\n\n    if-ne v1, v2, :s25_handoff_done\n\n    invoke-virtual {v0, p1}, Lcom/android/bluetooth/a2dp/A2dpService;->setActiveDevice(Landroid/bluetooth/BluetoothDevice;)Z\n\n    move-result v1\n\n    if-eqz v1, :s25_handoff_done\n\n    invoke-virtual {v0}, Lcom/android/bluetooth/a2dp/A2dpService;->getActiveDevice()Landroid/bluetooth/BluetoothDevice;\n\n    move-result-object v0\n\n    invoke-static {v0, p1}, Ljava/util/Objects;->equals(Ljava/lang/Object;Ljava/lang/Object;)Z\n\n    move-result v0\n\n    if-eqz v0, :s25_handoff_done\n\n    const/4 v0, 0x1\n\n    invoke-virtual {p0, v0}, Lcom/android/bluetooth/le_audio/LeAudioService;->removeActiveDevice(Z)Z\n\n    :s25_handoff_done\n    return-void\n.end method\n\n"
+        },
+        {
+          "line": 27439,
+          "delete": 0,
+          "insert": "    invoke-direct {p0, p1}, Lcom/android/bluetooth/le_audio/LeAudioService;->s25PrepareClassicHandoff(Landroid/bluetooth/BluetoothDevice;)V\n\n"
+        }
+      ]
     }
   ]
 }
