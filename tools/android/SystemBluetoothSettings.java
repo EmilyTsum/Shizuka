@@ -7,8 +7,7 @@ import java.util.*;
 final class SystemBluetoothSettings implements DevicePreferences.SystemStore {
     private final BluetoothRuntime runtime;
     private final BluetoothDevice device;
-    private final Map<Integer, BluetoothProfile> profiles = new HashMap<>();
-    private final Set<Integer> pending = new HashSet<>();
+    private BluetoothProfiles profiles;
     private boolean finished;
     private SystemBluetoothSettings(BluetoothRuntime runtime, BluetoothDevice device) {
         this.runtime = runtime; this.device = device;
@@ -18,7 +17,7 @@ final class SystemBluetoothSettings implements DevicePreferences.SystemStore {
     private static BluetoothDevice resolve(BluetoothAdapter adapter, String address) throws Exception {
         if ("active".equals(address)) {
             Map<String, BluetoothDevice> active = new LinkedHashMap<>();
-            for (int profile : new int[] {2, 22, 1}) {
+            for (int profile : new int[] {BluetoothProfile.A2DP, BluetoothProfile.LE_AUDIO, BluetoothProfile.HEADSET}) {
                 List<?> list;
                 try { list = (List<?>)call(adapter, "getActiveDevices", new Class<?>[] {int.class}, profile); }
                 catch (UnsupportedOperationException | IllegalArgumentException unsupported) { continue; }
@@ -39,12 +38,15 @@ final class SystemBluetoothSettings implements DevicePreferences.SystemStore {
         throw new IllegalArgumentException("device is not bonded");
     }
     private static int profileId(String name) {
-        return "a2dp".equals(name) ? 2 : "headset".equals(name) ? 1 : 22;
+        return "a2dp".equals(name) ? BluetoothProfile.A2DP
+            : "headset".equals(name) ? BluetoothProfile.HEADSET : BluetoothProfile.LE_AUDIO;
     }
-    private BluetoothProfile profile(int id) {
-        BluetoothProfile profile = profiles.get(id);
-        if (profile == null) throw new UnsupportedOperationException("Bluetooth profile unavailable: " + id);
-        return profile;
+    private BluetoothProfile profile(int id) throws Exception {
+        return profiles.require(id);
+    }
+    private static String unavailable(Exception error) {
+        return "unavailable:" + (error instanceof ProfileSession.Unavailable
+            ? ((ProfileSession.Unavailable)error).state.label : error.getClass().getSimpleName());
     }
     private Bundle preferred() throws Exception {
         Bundle bundle = (Bundle)call(runtime.adapter, "getPreferredAudioProfiles", new Class<?>[] {BluetoothDevice.class}, device);
@@ -57,7 +59,8 @@ final class SystemBluetoothSettings implements DevicePreferences.SystemStore {
             Bundle saved = preferred();
             for (String mode : new String[] {"output", "duplex"}) {
                 int id = saved.getInt("output".equals(mode) ? "audio_mode_output_only" : "audio_mode_duplex", -1);
-                values.put("transport_" + mode, id == 22 ? "le" : id == 2 || id == 1 ? "classic" : "system");
+                values.put("transport_" + mode, id == BluetoothProfile.LE_AUDIO ? "le"
+                    : id == BluetoothProfile.A2DP || id == BluetoothProfile.HEADSET ? "classic" : "system");
             }
         } catch (Exception e) {
             for (String mode : new String[] {"output", "duplex"}) values.put("transport_" + mode, "unavailable:" + e.getClass().getSimpleName());
@@ -66,22 +69,23 @@ final class SystemBluetoothSettings implements DevicePreferences.SystemStore {
             try {
                 int policy = (Integer)call(profile(profileId(name)), "getConnectionPolicy", new Class<?>[] {BluetoothDevice.class}, device);
                 values.put("profile_" + name, policy == 100 ? "true" : policy == 0 ? "false" : "system");
-            } catch (Exception e) { values.put("profile_" + name, "unavailable:" + e.getClass().getSimpleName()); }
+            } catch (Exception e) { values.put("profile_" + name, unavailable(e)); }
         }
         try {
-            int value = (Integer)call(profile(2), "isOptionalCodecsEnabled", new Class<?>[] {BluetoothDevice.class}, device);
+            int value = (Integer)call(profile(BluetoothProfile.A2DP), "isOptionalCodecsEnabled", new Class<?>[] {BluetoothDevice.class}, device);
             values.put("optional_codecs", value == 1 ? "true" : value == 0 ? "false" : "system");
-        } catch (Exception e) { values.put("optional_codecs", "unavailable:" + e.getClass().getSimpleName()); }
+        } catch (Exception e) { values.put("optional_codecs", unavailable(e)); }
         try {
-            Object status = call(profile(2), "getCodecStatus", new Class<?>[] {BluetoothDevice.class}, device);
+            Object status = call(profile(BluetoothProfile.A2DP), "getCodecStatus", new Class<?>[] {BluetoothDevice.class}, device);
             Object codec = status == null ? null : call(status, "getCodecConfig", new Class<?>[] {});
             values.put("codec", codec == null ? "not_connected" : codec.toString());
-        } catch (Exception e) { values.put("codec", "unavailable:" + e.getClass().getSimpleName()); }
+        } catch (Exception e) { values.put("codec", unavailable(e)); }
         return values;
     }
     public void transport(String mode, String value) throws Exception {
         String key = "output".equals(mode) ? "audio_mode_output_only" : "audio_mode_duplex";
-        int wanted = "le".equals(value) ? 22 : "output".equals(mode) ? 2 : 1;
+        int wanted = "le".equals(value) ? BluetoothProfile.LE_AUDIO
+            : "output".equals(mode) ? BluetoothProfile.A2DP : BluetoothProfile.HEADSET;
         if (preferred().getInt(key, -1) != wanted) {
             // Submit only the changed key; do not replay another profile's saved value.
             Bundle change = new Bundle(); change.putInt(key, wanted);
@@ -103,7 +107,7 @@ final class SystemBluetoothSettings implements DevicePreferences.SystemStore {
             throw new IllegalStateException("Android has not confirmed connection policy");
     }
     public void optionalCodecs(int preference) throws Exception {
-        BluetoothProfile a2dp = profile(2);
+        BluetoothProfile a2dp = profile(BluetoothProfile.A2DP);
         int current = (Integer)call(a2dp, "isOptionalCodecsEnabled", new Class<?>[] {BluetoothDevice.class}, device);
         if (current != preference) call(a2dp, "setOptionalCodecsEnabled", new Class<?>[] {BluetoothDevice.class, int.class}, device, preference);
         if ((Integer)call(a2dp, "isOptionalCodecsEnabled", new Class<?>[] {BluetoothDevice.class}, device) != preference)
@@ -120,28 +124,17 @@ final class SystemBluetoothSettings implements DevicePreferences.SystemStore {
                 System.out.println(entry.getKey() + "=" + entry.getValue());
         } catch (Exception e) { System.err.println("system_settings_error=" + e.getMessage()); status = 1; }
         finally {
-            for (Map.Entry<Integer, BluetoothProfile> entry : profiles.entrySet())
-                runtime.adapter.closeProfileProxy(entry.getKey(), entry.getValue());
+            profiles.close();
         }
         System.exit(status);
     }
     static void run(BluetoothRuntime runtime, String address, DevicePreferences.Command command) throws Exception {
         if (!runtime.adapter.isEnabled()) throw new IllegalStateException("Bluetooth is off");
         SystemBluetoothSettings settings = new SystemBluetoothSettings(runtime, resolve(runtime.adapter, address));
-        Handler handler = new Handler(Looper.getMainLooper());
-        settings.pending.addAll(Arrays.asList(2, 1, 22));
-        BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
-            public void onServiceConnected(int id, BluetoothProfile proxy) {
-                if (settings.finished) { runtime.adapter.closeProfileProxy(id, proxy); return; }
-                settings.profiles.put(id, proxy); settings.pending.remove(id);
-                if (settings.pending.isEmpty()) settings.finish(command);
-            }
-            public void onServiceDisconnected(int id) { settings.profiles.remove(id); }
-        };
-        handler.postDelayed(() -> settings.finish(command), 3000);
-        for (int id : new int[] {2, 1, 22})
-            if (!runtime.adapter.getProfileProxy(runtime.context, listener, id)) settings.pending.remove(id);
-        if (settings.pending.isEmpty()) settings.finish(command);
+        settings.profiles = new BluetoothProfiles(runtime,
+            new int[] {BluetoothProfile.A2DP, BluetoothProfile.HEADSET, BluetoothProfile.LE_AUDIO},
+            (id, operation, error) -> System.err.println("profile_" + id + "_" + operation + "=" + error.getClass().getSimpleName()));
+        settings.profiles.start(3000, () -> settings.finish(command));
         Looper.loop();
     }
 }

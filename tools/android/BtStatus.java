@@ -2,7 +2,6 @@
 import android.bluetooth.*;
 import android.content.Context;
 import android.media.AudioManager;
-import android.os.Handler;
 import android.os.Looper;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -16,11 +15,9 @@ import org.json.*;
 public class BtStatus {
     static Context context;
     static BluetoothAdapter adapter;
-    static final Map<Integer, BluetoothProfile> profiles = new HashMap<>();
-    static final Set<Integer> pending = new HashSet<>();
+    static BluetoothProfiles profiles;
     static final JSONArray errors = new JSONArray();
     static boolean finished;
-    static Handler handler;
     static Path moduleRoot;
     static final Path DATA = Paths.get("/data/adb/shizuka");
     static final Path LEGACY_DATA = Paths.get("/data/adb/s25_bluetooth");
@@ -94,7 +91,7 @@ public class BtStatus {
         JSONObject j = new JSONObject();
         Class<?> audio = Class.forName("android.media.AudioSystem");
         int devices =
-            ((Number)audio.getMethod("getDevicesForStream", int.class).invoke(null, 3)).intValue();
+            ((Number)audio.getMethod("getDevicesForStream", int.class).invoke(null, AudioManager.STREAM_MUSIC)).intValue();
         JSONArray names = new JSONArray();
         int bluetoothMask = 0, leMask = 0;
         for (Field f : audio.getFields()) {
@@ -124,7 +121,7 @@ public class BtStatus {
     }
     static JSONArray active(int id) throws Exception {
         JSONArray out = new JSONArray();
-        BluetoothProfile profile = profiles.get(id);
+        BluetoothProfile profile = profiles == null ? null : profiles.get(id);
         if (profile == null)
             return out;
         List<?> devices =
@@ -137,8 +134,8 @@ public class BtStatus {
             JSONObject j = new JSONObject();
             // Device addresses are deliberately omitted from UI and copied snapshots.
             j.put("device", d.getName() == null ? "Bluetooth device" : d.getName());
-            j.put("transport", id == 22 ? "LE Audio" : "A2DP");
-            if (id == 2) {
+            j.put("transport", id == BluetoothProfile.LE_AUDIO ? "LE Audio" : "A2DP");
+            if (id == BluetoothProfile.A2DP) {
                 try {
                     j.put("stream_started", call(profile, "isA2dpPlaying",
                                                  new Class<?>[] {BluetoothDevice.class}, d));
@@ -148,7 +145,7 @@ public class BtStatus {
             }
             try {
                 Object c;
-                if (id == 22) {
+                if (id == BluetoothProfile.LE_AUDIO) {
                     int group = ((Number)call(profile, "getGroupId",
                                               new Class<?>[] {BluetoothDevice.class}, d))
                                     .intValue();
@@ -160,7 +157,7 @@ public class BtStatus {
                         call(profile, "getCodecStatus", new Class<?>[] {BluetoothDevice.class}, d);
                     c = status == null ? null : get(status, "getCodecConfig");
                 }
-                j.put("codec", codec(c, id == 22));
+                j.put("codec", codec(c, id == BluetoothProfile.LE_AUDIO));
             } catch (Exception e) {
                 j.put("codec", new JSONObject().put("available", false));
                 error("codec", e);
@@ -213,6 +210,7 @@ public class BtStatus {
             return;
         finished = true;
         JSONObject result = new JSONObject();
+        String fallback = null;
         try {
             result.put("schema", 1).put("collected_at_ms", System.currentTimeMillis());
             result.put("bluetooth_enabled", adapter != null && adapter.isEnabled());
@@ -225,7 +223,7 @@ public class BtStatus {
             }
             result.put("route", r);
             JSONArray devices = new JSONArray();
-            for (int id : new int[] {22, 2}) {
+            for (int id : new int[] {BluetoothProfile.LE_AUDIO, BluetoothProfile.A2DP}) {
                 try {
                     JSONArray items = active(id);
                     for (int i = 0; i < items.length(); i++)
@@ -245,13 +243,11 @@ public class BtStatus {
             }
             result.put("lossless_transmission", "Unverified");
             result.put("errors", errors);
-            System.out.println(result.toString());
         } catch (Exception e) {
-            System.out.println("{\"schema\":1,\"error\":\"Status snapshot failed\"}");
+            fallback = "{\"schema\":1,\"error\":\"Status snapshot failed\"}";
         } finally {
-            if (adapter != null)
-                for (Map.Entry<Integer, BluetoothProfile> p : profiles.entrySet())
-                    adapter.closeProfileProxy(p.getKey(), p.getValue());
+            if (profiles != null) profiles.close();
+            System.out.println(fallback == null ? result.toString() : fallback);
             System.exit(0);
         }
     }
@@ -262,29 +258,14 @@ public class BtStatus {
             BluetoothRuntime runtime = BluetoothRuntime.connect();
             context = runtime.context;
             adapter = runtime.adapter;
-            handler = new Handler(Looper.getMainLooper());
             if (adapter == null || !adapter.isEnabled()) {
                 finish();
                 return;
             }
-            pending.add(2);
-            pending.add(22);
-            handler.postDelayed(BtStatus::finish, 2500);
-            BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
-                public void onServiceConnected(int id, BluetoothProfile proxy) {
-                    profiles.put(id, proxy);
-                    pending.remove(id);
-                    if (pending.isEmpty())
-                        handler.postDelayed(BtStatus::finish, 50);
-                }
-                public void onServiceDisconnected(int id) { profiles.remove(id); }
-            };
-            for (int id : new int[] {2, 22}) {
-                if (!adapter.getProfileProxy(context, listener, id))
-                    pending.remove(id);
-            }
-            if (pending.isEmpty())
-                finish();
+            profiles = new BluetoothProfiles(runtime,
+                new int[] {BluetoothProfile.A2DP, BluetoothProfile.LE_AUDIO},
+                (id, operation, exception) -> error("profile " + id + " " + operation, exception));
+            profiles.start(2500, BtStatus::finish);
             Looper.loop();
         } catch (Exception e) {
             error("Bluetooth service", e);

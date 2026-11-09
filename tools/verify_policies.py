@@ -26,6 +26,7 @@ def verify_policies(android_jar=None):
             "DevicePreferences",
             "CodecPresentation",
             "ExtensionConfigStore",
+            "ProfileSession",
         ]
     ]
     subprocess.run(
