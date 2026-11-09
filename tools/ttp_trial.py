@@ -7,7 +7,7 @@ import json
 import shutil
 from pathlib import Path
 
-from shizuka.ttp import inspect_stock, validate_control_plan, write_candidate
+from shizuka.ttp import inspect_stock, plan_increments, write_candidate
 
 
 def main():
@@ -19,9 +19,9 @@ def main():
     inspect.add_argument("--input", type=Path, required=True)
     build = sub.add_parser("build", help="create a candidate; never install or restart anything")
     build.add_argument("--input", type=Path, required=True)
-    tuning = build.add_mutually_exclusive_group(required=True)
-    tuning.add_argument("--delta-ms", type=int, choices=(0, 50, 100))
-    tuning.add_argument(
+    build.add_argument("--delta-ms", "--hq-delta-ms", type=int, choices=(0, 50, 100))
+    build.add_argument("--ll-delta-ms", type=int, choices=(0, 50, 100))
+    build.add_argument(
         "--plan", type=Path, help="JSON plan from config.sh tuning plan or codec_control.py"
     )
     build.add_argument("--output", type=Path, required=True)
@@ -34,14 +34,26 @@ def main():
         else:
             plan = None
             if args.plan:
+                if args.delta_ms is not None or args.ll_delta_ms is not None:
+                    parser.error("--plan cannot be combined with direct increments")
                 if args.plan.stat().st_size > 32768:
                     raise ValueError("Codec-control plan is too large")
                 plan = json.loads(args.plan.read_text())
-                args.delta_ms = validate_control_plan(plan)
-            if args.delta_ms and (not args.llvm_mc or not args.linker):
+                args.delta_ms, args.ll_delta_ms = plan_increments(plan)
+            elif args.delta_ms is None and args.ll_delta_ms is None:
+                parser.error("Specify --plan, --delta-ms or --ll-delta-ms")
+            args.delta_ms = args.delta_ms or 0
+            args.ll_delta_ms = args.ll_delta_ms or 0
+            if (args.delta_ms or args.ll_delta_ms) and (not args.llvm_mc or not args.linker):
                 parser.error("Set --llvm-mc and --linker to LLVM tools with Hexagon support")
             result = write_candidate(
-                args.input, args.output, args.delta_ms, args.llvm_mc, args.linker, plan
+                args.input,
+                args.output,
+                args.delta_ms,
+                args.llvm_mc,
+                args.linker,
+                plan,
+                args.ll_delta_ms,
             )
         print(json.dumps(result, indent=2))
     except (ValueError, OSError) as error:

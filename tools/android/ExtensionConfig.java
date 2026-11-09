@@ -4,7 +4,7 @@ import java.util.*;
 /** Only extension controls live here. Android owns all per-device Bluetooth preferences. */
 final class ExtensionConfig {
     static final String[] KEYS = {"schema", "classic_qhs_host_aware", "aptx_voice_enabled",
-                                 "adaptive_priority", "aptx_hd_priority", CodecTuning.KEY};
+                                 "adaptive_priority", "aptx_hd_priority", CodecTuning.KEY, CodecTuning.LL_KEY};
     private static final Set<String> ALLOWED = new HashSet<>(Arrays.asList(KEYS));
     private static final Set<String> LEGACY_DEVICE_KEYS = new HashSet<>(Arrays.asList(
         "target_address", "startup_transport", "call_transport", "adaptive_apply_on_connect",
@@ -42,6 +42,7 @@ final class ExtensionConfig {
         values.put("schema", "2");
         values.put("classic_qhs_host_aware", input.getOrDefault("classic_qhs_host_aware", "false"));
         values.put(CodecTuning.KEY, input.getOrDefault(CodecTuning.KEY, "0"));
+        values.put(CodecTuning.LL_KEY, input.getOrDefault(CodecTuning.LL_KEY, "0"));
         for (String key : new String[] {"aptx_voice_enabled", "adaptive_priority", "aptx_hd_priority"}) {
             String value = input.getOrDefault(key, "system");
             // These were forced defaults, not system preferences. Do not replay them on upgrade.
@@ -55,6 +56,7 @@ final class ExtensionConfig {
     }
     private static void validate(Map<String, String> values) {
         CodecTuning.value(values.get(CodecTuning.KEY));
+        CodecTuning.value(CodecTuning.LL_KEY, values.get(CodecTuning.LL_KEY));
         choice("classic_qhs_host_aware", values.get("classic_qhs_host_aware"), "true", "false");
         choice("aptx_voice_enabled", values.get("aptx_voice_enabled"), "system", "true", "false");
         for (String key : new String[] {"adaptive_priority", "aptx_hd_priority"})

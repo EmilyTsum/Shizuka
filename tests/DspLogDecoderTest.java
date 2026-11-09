@@ -67,6 +67,11 @@ public final class DspLogDecoderTest {
         check(field(legacy, "sample_rate_hz", 20).get("age_seconds").equals(10.0));
         check(field(legacy, "encoder_lossless", 20) == null);
         check(legacy.snapshot(24).get("available").equals(false));
+        legacy.accept(25, "Shizuka TTP HQ+50 LL+100 requested; calculated us 179000");
+        check(field(legacy, "ttp_hq_trial_requested_ms", 25).get("value").equals(50L));
+        check(field(legacy, "ttp_ll_trial_requested_ms", 25).get("value").equals(100L));
+        check(field(legacy, "calculated_ttp_us", 25).get("value").equals(179000L));
+        check(field(legacy, "ttp_trial_requested_ms", 25) == null);
         for (double bad : new double[] {Double.NaN, Double.POSITIVE_INFINITY, -1}) {
             try { d.accept(bad, "APTX"); throw new AssertionError(); } catch (IllegalArgumentException expected) { assertions++; }
         }

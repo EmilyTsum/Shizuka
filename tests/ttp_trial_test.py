@@ -41,6 +41,11 @@ class TtpTrialGuards(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Only"):
                     ttp.compile_patch(value, "not-run", "not-run")
             run.assert_not_called()
+        with patch.object(ttp.subprocess, "run") as run:
+            for value in (-1, 1, 51, 101, True, 50.0, "50"):
+                with self.assertRaisesRegex(ValueError, "Only"):
+                    ttp.compile_patch(0, "not-run", "not-run", value)
+            run.assert_not_called()
 
     def test_existing_output_is_never_replaced(self):
         with tempfile.TemporaryDirectory() as directory:

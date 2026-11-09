@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from codec_control import CORE, records
 from shizuka.java import java_tools
 from shizuka.project import ANDROID
-from shizuka.ttp import validate_control_plan
+from shizuka.ttp import plan_increments, validate_control_plan
 
 
 def main():
@@ -31,7 +31,7 @@ def main():
             check=True,
         )
         config = root / "config.conf"
-        config.write_text("schema=2\naptx_hq_ttp_delta_ms=50\n")
+        config.write_text("schema=2\naptx_hq_ttp_delta_ms=50\nadaptive_ll_ttp_delta_ms=100\n")
         command = [
             java,
             "-cp",
@@ -60,15 +60,20 @@ def main():
                     pass
                 else:
                     raise AssertionError(f"Invalid plan accepted: {key}")
-        unsupported = json.loads(
+        ll = json.loads(
             subprocess.check_output([*command, "adaptive", "ll", "48000", "24"], text=True)
+        )
+        assert validate_control_plan(ll) == 100
+        assert plan_increments(ll) == (50, 100)
+        unsupported = json.loads(
+            subprocess.check_output([*command, "aptx-ll", "ll", "48000", "16"], text=True)
         )
         try:
             validate_control_plan(unsupported)
         except ValueError:
             pass
         else:
-            raise AssertionError("Unsupported LL plan accepted")
+            raise AssertionError("Separate aptX LL codec adjustment plan accepted")
         raw = root / "raw.jsonl"
         raw.write_text(
             json.dumps(

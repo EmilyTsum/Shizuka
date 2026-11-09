@@ -22,26 +22,31 @@ LOG = b"CAPI V2 APTX ADAPTIVE ENC Calculated ttpadj: ttpadj microseconds %lld\0"
 MAX_WIRE_US = 65535 * 8
 
 
-def validate_control_plan(plan):
+def plan_increments(plan):
     """Validate the versioned public plan boundary before invoking build tools."""
     if not isinstance(plan, dict):
         raise ValueError("Invalid codec-control plan")
     context = plan.get("context", {})
     increment = plan.get("requested_ms")
+    if not isinstance(context, dict):
+        raise ValueError("Invalid codec-control context")
+    ll = context.get("codec") == "adaptive" and context.get("mode") == "ll"
+    provider = "samsung-dzif-calculated-adaptive-ll-ttp" if ll else "samsung-dzif-calculated-hq-ttp"
+    coupled = ["adaptive/ll"] if ll else ["adaptive/hq", "lossless/hq"]
     if (
         type(plan.get("schema")) is not int
         or plan.get("schema") != 1
-        or plan.get("provider") != "samsung-dzif-calculated-hq-ttp"
+        or plan.get("provider") != provider
         or plan.get("applied") is not False
         or plan.get("activation") != "offline_dsp_build_then_fresh_graph"
-        or plan.get("coupled_contexts") != ["adaptive/hq", "lossless/hq"]
+        or plan.get("coupled_contexts") != coupled
         or type(increment) is not int
         or increment not in (0, 50, 100)
         or plan.get("state") != ("stock" if increment == 0 else "planned_not_applied")
         or not isinstance(context, dict)
         or context.get("profile") != "samsung-sm-s931z-dzif"
         or context.get("codec") not in ("adaptive", "lossless")
-        or context.get("mode") != "hq"
+        or context.get("mode") != ("ll" if ll else "hq")
         or type(context.get("sample_rate_hz")) is not int
         or type(context.get("selection_bits")) is not int
         or context.get("sample_rate_hz") not in (44100, 48000, 96000)
@@ -49,7 +54,20 @@ def validate_control_plan(plan):
         or (context.get("codec") == "lossless" and context.get("sample_rate_hz") != 44100)
     ):
         raise ValueError("Unsupported or inconsistent codec-control plan")
-    return increment
+    image = plan.get("image_request", {"hq_ms": increment, "adaptive_ll_ms": 0})
+    if not isinstance(image, dict) or set(image) != {"hq_ms", "adaptive_ll_ms"}:
+        raise ValueError("Invalid whole-image tuning request")
+    hq, adaptive_ll = image["hq_ms"], image["adaptive_ll_ms"]
+    if any(type(value) is not int or value not in (0, 50, 100) for value in (hq, adaptive_ll)):
+        raise ValueError("Invalid whole-image increments")
+    if (adaptive_ll if ll else hq) != increment:
+        raise ValueError("Context request differs from the whole-image request")
+    return hq, adaptive_ll
+
+
+def validate_control_plan(plan):
+    plan_increments(plan)
+    return plan["requested_ms"]
 
 
 # Only caller-saved r2-r7 and predicates are scratch. r16/r18/r19/r31 and the
@@ -95,6 +113,40 @@ SECTIONS {
 """
 
 
+def assembly_source(delta_ms, ll_delta_ms=0):
+    if not ll_delta_ms:
+        return ASM.replace("@DELTA_US@", str(delta_ms * 1000))
+    # Keep the original HQ-only bytes reproducible. The extended variant chooses
+    # an independent increment for actual Adaptive LL states 2/6 and HQ 3/7.
+    original = """{ r2 = memw(r19+#0) }
+{ p0 = cmp.eq(r2,#3); p1 = cmp.eq(r2,#7) }
+{ p0 = or(p0,p1) }
+{ if (!p0) jump .Lresume }
+{ r7:6 = combine(#0,##524280) }
+{ p0 = cmp.gtu(r21:20,r7:6) }
+{ if (p0) jump .Lresume }
+{ r3:2 = combine(#0,##@DELTA_US@) }"""
+    extended = f"""{{ r2 = memw(r19+#0) }}
+{{ p0 = cmp.eq(r2,#3); p1 = cmp.eq(r2,#7) }}
+{{ p0 = or(p0,p1) }}
+{{ if (p0) jump .Lhq }}
+{{ p0 = cmp.eq(r2,#2); p1 = cmp.eq(r2,#6) }}
+{{ p0 = or(p0,p1) }}
+{{ if (!p0) jump .Lresume }}
+{{ r3:2 = combine(#0,##{ll_delta_ms * 1000}) }}
+{{ jump .Lguard }}
+.Lhq:
+{{ r3:2 = combine(#0,##{delta_ms * 1000}) }}
+.Lguard:
+{{ p0 = cmp.eq(r2,#0); if (p0.new) jump:nt .Lresume }}
+{{ r7:6 = combine(#0,##524280) }}
+{{ p0 = cmp.gtu(r21:20,r7:6) }}
+{{ if (p0) jump .Lresume }}"""
+    if original not in ASM:
+        raise ValueError("HQ patch template changed; review the LL extension")
+    return ASM.replace(original, extended)
+
+
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -137,14 +189,16 @@ def inspect_stock(data):
     }
 
 
-def compile_patch(delta_ms, llvm_mc, linker):
-    if type(delta_ms) is not int or delta_ms not in (50, 100):
-        raise ValueError("Only +50 ms and +100 ms trials are supported")
+def compile_patch(delta_ms, llvm_mc, linker, ll_delta_ms=0):
+    if any(
+        type(value) is not int or value not in (0, 50, 100) for value in (delta_ms, ll_delta_ms)
+    ) or not (delta_ms or ll_delta_ms):
+        raise ValueError("Only nonzero combinations of stock/+50/+100 ms are supported")
     with tempfile.TemporaryDirectory(prefix="shizuka-ttp-") as directory:
         root = Path(directory)
         source = root / "bias.s"
         script = root / "bias.ld"
-        source.write_text(ASM.replace("@DELTA_US@", str(delta_ms * 1000)))
+        source.write_text(assembly_source(delta_ms, ll_delta_ms))
         script.write_text(LINKER)
         subprocess.run(
             [
@@ -184,11 +238,13 @@ def compile_patch(delta_ms, llvm_mc, linker):
         return pieces
 
 
-def patch_verified(data, delta_ms, pieces):
+def patch_verified(data, delta_ms, pieces, ll_delta_ms=0):
     """Recheck every gate even when called outside the command-line builder."""
     baseline = inspect_stock(data)
-    if type(delta_ms) is not int or delta_ms not in (50, 100):
-        raise ValueError("Only +50 ms and +100 ms trials are supported")
+    if any(
+        type(value) is not int or value not in (0, 50, 100) for value in (delta_ms, ll_delta_ms)
+    ) or not (delta_ms or ll_delta_ms):
+        raise ValueError("Only nonzero combinations of stock/+50/+100 ms are supported")
     if set(pieces) != {".hook", ".bias"} or len(pieces[".hook"]) != 12:
         raise ValueError("Invalid patch sections")
     end = CAVE + len(pieces[".bias"])
@@ -206,6 +262,11 @@ def patch_verified(data, delta_ms, pieces):
     # "requested" distinguishes configuration from application when the ceiling
     # guard declines an increment, or when this is an LL/other-state invocation.
     label = f"Shizuka TTP HQ requested +{delta_ms}ms; calculated us %lld\n".encode() + b"\0"
+    if ll_delta_ms:
+        label = (
+            f"Shizuka TTP HQ+{delta_ms} LL+{ll_delta_ms} requested; calculated us %lld\n".encode()
+            + b"\0"
+        )
     if len(label) > len(LOG):
         raise ValueError("Diagnostic label does not fit")
     result[LOG_OFFSET : LOG_OFFSET + len(LOG)] = label.ljust(len(LOG), b"\0")
@@ -231,19 +292,29 @@ def patch_verified(data, delta_ms, pieces):
         "audio_verified": False,
         "receiver_delay_verified": False,
     }
+    if ll_delta_ms:
+        manifest["adaptive_ll_delta_ms"] = ll_delta_ms
+        manifest["states"] = ([3, 7] if delta_ms else []) + [2, 6]
+        manifest["semantics"] = (
+            "Independent HQ states 3/7 and Adaptive LL states 2/6 increments after stock policy; final state term included in the 16-bit wire ceiling check"
+        )
     return bytes(result), manifest
 
 
-def write_candidate(stock, destination, delta_ms, llvm_mc, linker, control_plan=None):
+def write_candidate(
+    stock, destination, delta_ms, llvm_mc, linker, control_plan=None, ll_delta_ms=0
+):
     data = Path(stock).read_bytes()
     baseline = inspect_stock(data)
-    if control_plan is not None and validate_control_plan(control_plan) != delta_ms:
+    if control_plan is not None and plan_increments(control_plan) != (delta_ms, ll_delta_ms):
         raise ValueError("TTP increment differs from the control plan")
-    if type(delta_ms) is not int or delta_ms not in (0, 50, 100):
+    if any(
+        type(value) is not int or value not in (0, 50, 100) for value in (delta_ms, ll_delta_ms)
+    ):
         raise ValueError("Only stock (0), +50 ms and +100 ms trials are supported")
-    if delta_ms:
-        pieces = compile_patch(delta_ms, llvm_mc, linker)
-        result, manifest = patch_verified(data, delta_ms, pieces)
+    if delta_ms or ll_delta_ms:
+        pieces = compile_patch(delta_ms, llvm_mc, linker, ll_delta_ms)
+        result, manifest = patch_verified(data, delta_ms, pieces, ll_delta_ms)
     else:
         result = data
         manifest = {
@@ -268,6 +339,6 @@ def write_candidate(stock, destination, delta_ms, llvm_mc, linker, control_plan=
     destination.mkdir(parents=True, exist_ok=False)
     (destination / "aptx_adaptive_enc_module.so.1").write_bytes(result)
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    if delta_ms:
-        (destination / "bias.s").write_text(ASM.replace("@DELTA_US@", str(delta_ms * 1000)))
+    if delta_ms or ll_delta_ms:
+        (destination / "bias.s").write_text(assembly_source(delta_ms, ll_delta_ms))
     return manifest

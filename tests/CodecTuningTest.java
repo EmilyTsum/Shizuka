@@ -19,6 +19,15 @@ public final class CodecTuningTest {
             try { defaults.with(CodecTuning.KEY, value); throw new AssertionError(); } catch (IllegalArgumentException expected) { assertions++; }
         }
         check(CodecTuning.key("adaptive.hq.ttp_delta_ms").equals(CodecTuning.key("lossless.hq.ttp_delta_ms")));
+        for (String value : Arrays.asList("0", "50", "100")) {
+            ExtensionConfig independent = defaults.with(CodecTuning.KEY, "100").with(CodecTuning.key("adaptive.ll.ttp_delta_ms"), value);
+            Map<String, Object> ll = CodecTuning.plan(independent, CodecPresentation.SAMSUNG_DZIF, "adaptive", "ll", 48000, 24);
+            check(ll.get("requested_ms").equals(Integer.parseInt(value)));
+            check(ll.get("provider").equals(CodecTuning.LL_PROVIDER));
+            check(ll.get("coupled_contexts").equals(CodecTuning.LL_CONTEXTS));
+            check(independent.value(CodecTuning.KEY).equals("100"));
+            check(ll.get("applied").equals(false));
+        }
         for (String profile : Arrays.asList(CodecPresentation.SAMSUNG_DZIF, "unsupported"))
             for (String codec : Arrays.asList("adaptive", "aptx-ll", "aptx-hd", "lc3"))
                 for (String mode : Arrays.asList("hq", "ll", "system")) {
@@ -29,8 +38,8 @@ public final class CodecTuningTest {
                 }
         try { CodecTuning.plan(defaults, CodecPresentation.SAMSUNG_DZIF, "lossless", "ll", 44100, 16); throw new AssertionError(); }
         catch (IllegalArgumentException expected) { assertions++; }
-        try { CodecTuning.key("adaptive.ll.ttp_delta_ms"); throw new AssertionError(); }
+        try { CodecTuning.key("aptx-ll.ll.ttp_delta_ms"); throw new AssertionError(); }
         catch (IllegalArgumentException expected) { assertions++; }
-        System.out.println("Codec tuning: " + assertions + " checks; shared HQ scope, typed values, unsupported contexts and intent/application separation passed.");
+        System.out.println("Codec tuning: " + assertions + " checks; independent Adaptive LL/shared HQ controls, typed values and intent/application separation passed.");
     }
 }
