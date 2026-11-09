@@ -7,7 +7,7 @@ final class TuningDefinitions {
     static final TuningCatalog CATALOG = create();
     private static TuningCatalog create() {
         List<TuningCatalog.IntegerControl> controls = Arrays.asList(
-            new TuningCatalog.IntegerControl("adaptive_hq_ttp_delta_ms", "ms", 0, 0, 100, 1, "aptx_hq_ttp_delta_ms", "adaptive.hq.ttp_delta_ms", "lossless.hq.ttp_delta_ms"),
+            new TuningCatalog.IntegerControl("adaptive_hq_ttp_delta_ms", "ms", 0, 0, 150, 1, "aptx_hq_ttp_delta_ms", "adaptive.hq.ttp_delta_ms", "lossless.hq.ttp_delta_ms"),
             new TuningCatalog.IntegerControl("adaptive_ll_ttp_delta_ms", "ms", 0, 0, 100, 1, "adaptive.ll.ttp_delta_ms"));
         Map<String, List<TuningCatalog.Provider>> profiles = new LinkedHashMap<>();
         profiles.put("samsung-sm-s931z-dzif", Arrays.asList(

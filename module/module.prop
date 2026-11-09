@@ -1,6 +1,6 @@
 id=s25_aptx_adaptive
 name=Shizuka Bluetooth
-version=0.9.1-test
-versionCode=14
+version=0.10.0-test
+versionCode=17
 author=EmilyTsum
 description=Android-owned Bluetooth preferences with verified device backends. Included native backend: SM-S931Z DZIF Adaptive/Lossless/LL and LE Audio fixes.

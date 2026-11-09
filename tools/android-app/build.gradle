@@ -1,0 +1,47 @@
+plugins { id 'com.android.application' version '8.7.3' }
+
+android {
+    namespace 'dev.shizuka.settings'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'dev.shizuka.settings'
+        minSdk 29
+        targetSdk 35
+        versionCode 17
+        versionName '0.10.0-test'
+        resourceConfigurations += ['en']
+    }
+    sourceSets.main {
+        manifest.srcFile 'AndroidManifest.xml'
+        java.srcDirs = ['src']
+        res.srcDirs = ['res']
+        assets.srcDirs = ['assets']
+    }
+    buildTypes.release { minifyEnabled false }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    packaging.resources.excludes += ['META-INF/DEPENDENCIES']
+}
+buildDir = file('../../build/settings-app-gradle')
+
+// OneUIProject replaces these upstream AndroidX modules, as in its official template.
+configurations.configureEach {
+    exclude group: 'androidx.appcompat', module: 'appcompat'
+    exclude group: 'androidx.core', module: 'core'
+    exclude group: 'androidx.drawerlayout', module: 'drawerlayout'
+    exclude group: 'androidx.viewpager', module: 'viewpager'
+    exclude group: 'androidx.fragment', module: 'fragment'
+    exclude group: 'androidx.customview', module: 'customview'
+    exclude group: 'androidx.coordinatorlayout', module: 'coordinatorlayout'
+    exclude group: 'com.android.support', module: 'support-compat'
+}
+
+dependencies {
+    implementation 'io.github.oneuiproject:design:1.2.6'
+    implementation 'io.github.oneuiproject.sesl:appcompat:1.4.0'
+    implementation 'io.github.oneuiproject.sesl:material:1.5.0'
+    implementation 'io.github.oneuiproject.sesl:recyclerview:1.4.0'
+    implementation 'io.github.oneuiproject.sesl:preference:1.1.0'
+}

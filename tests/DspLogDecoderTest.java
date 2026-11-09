@@ -72,6 +72,25 @@ public final class DspLogDecoderTest {
         check(field(legacy, "ttp_ll_trial_requested_ms", 25).get("value").equals(100L));
         check(field(legacy, "calculated_ttp_us", 25).get("value").equals(179000L));
         check(field(legacy, "ttp_trial_requested_ms", 25) == null);
+        DspLogDecoder rejected = new DspLogDecoder();
+        rejected.accept(30, packet(1, "STATE_ENCLEVEL_5_LOSSLESS"));
+        rejected.accept(30.1, "ADSP:[AS]: Segment [0] failed to read or streamed SigVerify for aptx_adaptive_enc_module.so.1");
+        check(rejected.snapshot(30.1).get("available").equals(false));
+        check(field(rejected, "encoder_lossless", 30.1) == null);
+        Map<?, ?> loader = (Map<?, ?>)rejected.snapshot(30.1).get("loader");
+        check(loader.get("code").equals("signature_verification_failed"));
+        rejected.accept(30.2, "ADSP:[AS]: Error: dlopen_ex failed for aptx_adaptive_enc_module.so.1 (flags 2)");
+        check(((Map<?, ?>)rejected.snapshot(30.2).get("loader")).get("code").equals("signature_verification_failed"));
+        rejected.contextChanged("media route changed to speaker");
+        check(((Map<?, ?>)rejected.snapshot(30.3).get("loader")).get("code").equals("signature_verification_failed"));
+        check(rejected.snapshot(30.3).get("available").equals(false));
+        check(((Map<?, ?>)rejected.snapshot(34).get("loader")).get("fresh").equals(false));
+        rejected.accept(35, "APTX ENC INIT: starting");
+        check(!rejected.snapshot(35).containsKey("loader"));
+        rejected.accept(36, packet(1, "STATE_ENCLEVEL_4"));
+        rejected.accept(36.1, "ADSP:[AS]: Segment [0] failed to read or streamed SigVerify for unrelated.so.1");
+        check(rejected.snapshot(36.1).get("available").equals(true));
+        check(!rejected.snapshot(36.1).containsKey("loader"));
         for (double bad : new double[] {Double.NaN, Double.POSITIVE_INFINITY, -1}) {
             try { d.accept(bad, "APTX"); throw new AssertionError(); } catch (IllegalArgumentException expected) { assertions++; }
         }

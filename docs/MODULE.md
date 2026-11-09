@@ -5,7 +5,8 @@ The module retains the exact DZIF stock and payload hash checks, late runtime mo
 | Entry point | Role |
 | --- | --- |
 | `service.sh`, `late-load.sh` | Launch the boot worker, which waits for a stable host framework and requires an exact verified payload proof. |
-| `action.sh` | Apply or repair the module; an unverified payload gets a 900-second trial. |
+| `action.sh`, `settings.sh` | Verify/install the bundled companion APK and open settings; no audio mutation. |
+| `apply.sh` | Explicitly apply or repair the module; an unverified payload gets a 900-second trial. |
 | `control.sh` | Validate payloads, activate, keep a verified session, or restore stock state. |
 | `watchdog.sh` | Request recovery when the trial expires or its Bluetooth process exits. |
 | `health.sh` | Watch a kept Bluetooth process and request recovery if its identity changes. |
@@ -27,7 +28,7 @@ Workers call `rollback-trial TOKEN` or `rollback-health TOKEN`. The controller c
 
 New activations save both PID and `/proc/PID/stat` start time for Bluetooth and the audio HAL. The shared verifier checks these identities and all three live APK/native/HAL hashes before a session is kept. The watchdog also checks process start time, so PID reuse does not hide the original process exiting. Older PID-only records retain the previous liveness check until the next activation writes complete records.
 
-Active/trial markers, a nonempty mount journal, and pending QHS restoration all count as recovery state. Action and boot activation restore this state before starting another generation. Direct activation refuses to overwrite it, including when an interrupted recovery has already removed the active/trial markers. The read-only `control.sh status` reports pending recovery instead of declaring that state inactive.
+Active/trial markers, a nonempty mount journal, and pending QHS restoration all count as recovery state. Explicit apply and boot activation restore this state before starting another generation. Direct activation refuses to overwrite it, including when an interrupted recovery has already removed the active/trial markers. The read-only `control.sh status` reports pending recovery instead of declaring that state inactive.
 
 Health and policy preparation both succeed before the trial is disarmed. Policy startup is idempotent, replaces PID-only legacy watchers, and waits for the new worker to acknowledge its recorded identity and become ready. Stop confirms termination before allowing a replacement. Failures propagate to the keep/recovery command, preserving the trial arm and recovery records. A matching command with a different process identity is left untouched and reported for inspection.
 

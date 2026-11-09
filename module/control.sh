@@ -134,6 +134,10 @@ rollback() (
  fi
  restore_properties || return 1
  previous_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
+ # Device experiments may need their loader reset after their owned mounts are removed.
+ if command -v profile_recover_experiments >/dev/null 2>&1;then
+  profile_recover_experiments || return 1
+ fi
  setprop ctl.restart "$AUDIO_HAL_SERVICE"
  hal_wait=0
  while [ "$hal_wait" -lt 20 ];do
@@ -149,7 +153,7 @@ rollback() (
   qhs_features false
   "$BB" sh "$MODDIR/qhs-nvm.sh" finish-remove
  fi
- rm -f "$STATE/active"
+ rm -f "$STATE/active" "$STATE/experiment-unverified"
  check_inputs
  : > "$STATE/mounts.tsv"
  # Keep recovery armed until owned NVM + running controller + native cleanup
@@ -226,6 +230,9 @@ case "${1:-status}" in
     echo "$target_pid $nsid $APK" >> "$STATE/mounts.tsv"
    fi
   done
+  if command -v profile_activate_experiments >/dev/null 2>&1;then
+   profile_activate_experiments || fail 'device experiment activation failed'
+  fi
   profile_apply_properties
   old_bt=$(host_bt || true)
   old_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
@@ -276,6 +283,7 @@ case "${1:-status}" in
   log "loaded experiment; watchdog will restore stock after $trial_seconds seconds unless committed"
   ;;
  keep-verified)
+  [ ! -e "$STATE/experiment-unverified" ] || fail 'device experiment requires fresh audio verification'
   [ -f "$STATE/active" ] || fail 'not active'
   [ -f "$MODDIR/proofs/verified-payloads.sha256" ] || fail 'heard/verified payload proof missing'
   "$BB" cmp -s "$MODDIR/payloads.sha256" "$MODDIR/proofs/verified-payloads.sha256" || fail 'unverified payload generation'
@@ -285,6 +293,7 @@ case "${1:-status}" in
   [ -f "$STATE/active" ] || fail 'not active'
   [ -f "$STATE/hci-and-audio-verified" ] || fail 'HCI and audio success have not been verified'
   keep_session
+  rm -f "$STATE/experiment-unverified"
   log 'kept current experimental process; automatic boot activation stays disabled';;
  rollback) rollback;;
  rollback-trial|rollback-health)

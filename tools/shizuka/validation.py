@@ -12,6 +12,8 @@ POLICY_CASES = (
     ("controller_features", "ControllerFeaturesTest"),
     ("system_preferences", "SystemPreferencesTest"),
     ("codec_presentation", "CodecPresentationTest"),
+    ("playback_selection", "PlaybackSelectionTest"),
+    ("settings_bridge", "BridgeProtocolTest"),
     ("extension_store", "ExtensionConfigStoreTest"),
     ("profile_session", "ProfileSessionTest"),
 )

@@ -25,6 +25,17 @@ expected=$(cat "$MODDIR/policy.sha256")
 actual=$("$BB" sha256sum "$MODDIR/policy.dex");actual=${actual%% *}
 [ "$actual" = "$expected" ] || { echo 'policy.dex hash mismatch' >&2;exit 1; }
 export CLASSPATH="$MODDIR/policy.dex"
+if [ "$#" = 2 ] && [ "$1" = tuning ] && [ "$2" = availability ];then
+ if [ -f "$MODDIR/device-profile" ];then
+  . "$MODDIR/lib/device.sh"
+  if command -v profile_tuning_availability >/dev/null 2>&1;then
+   profile_tuning_availability
+   exit 0
+  fi
+ fi
+ echo '{"schema":1,"runtime_apply_supported":false,"status":"unsupported","reason":"No runtime tuning provider is available for this device.","scope":"additional_ttp"}'
+ exit 0
+fi
 case "${1:-get}" in
  controller-features)
   [ "$#" = 1 ] || { echo 'controller-features takes no arguments' >&2;exit 64; }

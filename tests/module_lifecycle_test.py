@@ -31,6 +31,9 @@ class Lifecycle(unittest.TestCase):
 a = sys.argv[1:]
 if a[:3] == ["stat", "-c", "%u"]:
     print(os.environ.get("TEST_OWNER", "0"))
+elif a[:3] == ["stat", "-c", "%u:%a"]:
+    import stat
+    print(os.environ.get("TEST_OWNER", "0") + ":" + format(stat.S_IMODE(pathlib.Path(a[3]).stat().st_mode), "o"))
 elif a[0] == "flock":
     # Use a real inherited-FD lock, also on hosts without the flock utility.
     fcntl.flock(int(a[1]), fcntl.LOCK_EX)
@@ -196,8 +199,19 @@ esac
 """)
         return entry
 
-    def test_action_restores_orphaned_state_before_starting_another_trial(self):
+    def test_action_opens_settings_without_mutating_audio_or_recovery(self):
         entry = self.recovery_entry_fixture("action.sh")
+        (self.d / "settings.sh").write_text('echo settings-opened\n')
+        journal = self.pending_record("mounts.tsv")
+        original = journal.read_bytes()
+        result = subprocess.run(SHELL + [str(entry)], env=self.env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("settings-opened", result.stdout)
+        self.assertEqual(journal.read_bytes(), original)
+        self.assertFalse((self.d / "calls").exists())
+
+    def test_apply_restores_orphaned_state_before_starting_another_trial(self):
+        entry = self.recovery_entry_fixture("apply.sh")
         calls = self.d / "calls"
         for name in ["mounts.tsv", "qhs-nvm/intent", "qhs-nvm/restoring"]:
             with self.subTest(record=name):
@@ -664,6 +678,7 @@ else:
     def test_health_start_failure_does_not_disarm_trial(self):
         (self.state / "active").touch()
         (self.state / "armed").write_text("trial\n")
+        (self.state / "experiment-unverified").touch()
         (self.state / "hci-and-audio-verified").touch()
         body = CONTROL.split("\n commit)\n", 1)[1].split("\n rollback)", 1)[0]
         self.run_shell(
@@ -674,6 +689,92 @@ else:
             ok=False,
         )
         self.assertTrue((self.state / "armed").exists())
+        self.assertTrue((self.state / "experiment-unverified").exists())
+
+    def test_stale_dsp_request_is_retired_without_device_operations(self):
+        request = self.state / "dsp-trial.request"
+        request.write_text("previous-boot deadbeef /untrusted/path\n")
+        request.chmod(0o600)
+        self.run_shell(
+            'nsrun() { touch "$MODDIR/mutation"; return 1; }\n'
+            'setprop() { touch "$MODDIR/mutation"; return 1; }\nprofile_activate_experiments'
+        )
+        self.assertFalse(request.exists())
+        self.assertTrue(request.with_suffix(".request.stale").exists())
+        self.assertFalse((self.d / "mutation").exists())
+
+    def test_bad_dsp_candidate_is_rejected_before_device_operations(self):
+        boot = pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        request = self.state / "dsp-trial.request"
+        request.write_text(boot + " deadbeef /shared-storage/candidate.so\n")
+        request.chmod(0o600)
+        self.run_shell(
+            'nsrun() { touch "$MODDIR/mutation"; return 1; }\n'
+            'setprop() { touch "$MODDIR/mutation"; return 1; }\nprofile_activate_experiments',
+            ok=False,
+        )
+        self.assertTrue(request.exists())
+        self.assertFalse((self.d / "mutation").exists())
+
+    def test_dsp_recovery_keeps_marker_until_stock_and_restart_succeed(self):
+        marker = self.state / "dsp-trial.active"
+        marker.write_text("owned trial\n")
+        self.run_shell(
+            "nsrun() { echo unknown; }\n"
+            'setprop() { touch "$MODDIR/mutation"; return 1; }\nprofile_recover_experiments',
+            ok=False,
+        )
+        self.assertTrue(marker.exists())
+        self.assertFalse((self.d / "mutation").exists())
+        stock = "05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3"
+        self.run_shell(
+            "nsrun() { echo " + stock + "; }\ngetprop() { echo 1; }\n"
+            "setprop() { return 1; }\nprofile_recover_experiments",
+            ok=False,
+        )
+        self.assertTrue(marker.exists())
+
+    def test_current_boot_dsp_request_is_blocked_before_any_mutation(self):
+        request = self.state / "dsp-trial.request"
+        request.write_text("current-boot cdb67b33ae62e67e4d3cb160870c2c24eaa860fb750426ae8b2e41ca872f0646 /unused\n")
+        request.chmod(0o600)
+        result = self.run_shell(
+            'cat() { if [ "$1" = /proc/sys/kernel/random/boot_id ];then echo current-boot;else command cat "$@";fi; }\n'
+            'setprop() { touch "$MODDIR/mutation"; }\nprofile_activate_experiments', ok=False)
+        self.assertIn("signature verification", result.stderr)
+        self.assertTrue(request.exists())
+        self.assertFalse((self.d / "mutation").exists())
+        availability = json.loads(self.run_shell("profile_tuning_availability").stdout)
+        self.assertFalse(availability["runtime_apply_supported"])
+
+    def test_pending_module_removal_cleans_internal_ui_in_current_root_session(self):
+        (self.d / "lib").mkdir()
+        (self.d / "lib/runtime.sh").write_text((ROOT / "module/lib/runtime.sh").read_text() + "\nensure_busybox_shell() { :; }\n")
+        owner = self.d / "ui-lifecycle.sh"
+        owner.write_text((ROOT / "module/ui-lifecycle.sh").read_text().replace("BB=/data/adb/ksu/bin/busybox", 'BB="$MODDIR/bb"'))
+        (self.d / "remove").touch()
+        for script in ("control.sh", "settings-bridge.sh"):
+            (self.d / script).write_text('printf \'%s %s\\n\' "${0##*/}" "$1" >> "${0%/*}/cleanup-calls"\n')
+        pm = self.d / "pm"
+        pm.write_text('#!/bin/sh\nprintf \'pm %s\\n\' "$*" >> '+shlex.quote(str(self.d / "cleanup-calls"))+'\n'
+            + 'if [ "$1" = list ];then [ -f '+shlex.quote(str(self.d / "ui-removed"))+' ] || echo package:dev.shizuka.settings;fi\n'
+            + 'if [ "$1" = uninstall ];then touch '+shlex.quote(str(self.d / "ui-removed"))+';fi\n')
+        pm.chmod(0o755)
+        run = subprocess.run(SHELL + [str(owner), "watch"], env=self.env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        calls = (self.d / "cleanup-calls").read_text().splitlines()
+        self.assertEqual(calls, ["control.sh rollback", "settings-bridge.sh stop", "pm list packages dev.shizuka.settings", "pm uninstall dev.shizuka.settings", "control.sh rollback", "settings-bridge.sh stop", "pm list packages dev.shizuka.settings"])
+
+    def test_uninstaller_removes_internal_ui_even_when_audio_recovery_reports_failure(self):
+        uninstall = self.d / "uninstall.sh"
+        uninstall.write_text((ROOT / "module/uninstall.sh").read_text().replace("BB=/data/adb/ksu/bin/busybox", 'BB="$MODDIR/bb"'))
+        (self.d / "control.sh").write_text("exit 3\n")
+        pm = self.d / "pm"
+        pm.write_text('#!/bin/sh\nprintf \'%s %s\\n\' "$1" "$2" >> '+shlex.quote(str(self.d / "pm-calls"))+'\n')
+        pm.chmod(0o755)
+        run = subprocess.run(SHELL + [str(uninstall)], env=self.env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(run.returncode, 3, run.stderr)
+        self.assertEqual((self.d / "pm-calls").read_text().splitlines(), ["path dev.shizuka.settings", "uninstall dev.shizuka.settings"])
 
     def test_all_module_scripts_have_valid_shell_syntax(self):
         for script in (ROOT / "module").rglob("*.sh"):

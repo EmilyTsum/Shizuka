@@ -84,9 +84,59 @@ profile_diagnostics_preflight() {
  [ "$(getprop ro.build.version.incremental)" = S931ZSCU1DZIF ] || fail 'unsupported DSP diagnostics firmware'
  [ "$1" != recover ] || return 0
   actual=$("$BB" sha256sum /vendor/dsp/adsp/aptx_adaptive_enc_module.so.1);actual=${actual%% *}
-  case "$actual" in
+ profile_dsp_image_allowed "$actual" || fail 'unrecognized DSP image; diagnostics refused'
+}
+
+# Only an explicitly installed, owned trial creates this marker. Boot never applies a DSP image.
+profile_recover_experiments() (
+ [ -e "$STATE/dsp-trial.active" ] || return 0
+ [ ! -L "$STATE/dsp-trial.active" ] && [ "$("$BB" stat -c '%u' "$STATE/dsp-trial.active")" = 0 ] || return 1
+ dsp_target=/vendor/dsp/adsp/aptx_adaptive_enc_module.so.1
+ dsp_hash=$(nsrun 1 "$BB" sha256sum "$dsp_target");dsp_hash=${dsp_hash%% *}
+ [ "$dsp_hash" = 05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3 ] || return 1
+ dsp_old=$(getprop init.svc_debug_pid.vendor.audioadsprpcd_audiopd)
+ setprop ctl.restart vendor.audioadsprpcd_audiopd || return 1
+ dsp_attempt=0
+ while [ "$dsp_attempt" -lt 20 ];do
+  dsp_new=$(getprop init.svc_debug_pid.vendor.audioadsprpcd_audiopd)
+  if [ -n "$dsp_new" ] && [ "$dsp_new" != "$dsp_old" ] && [ -e "/proc/$dsp_new/cmdline" ];then
+   dsp_hash=$(nsrun "$dsp_new" "$BB" sha256sum "$dsp_target");dsp_hash=${dsp_hash%% *}
+   [ "$dsp_hash" = 05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3 ] || return 1
+   rm -f "$STATE/dsp-trial.active"
+   return 0
+  fi
+  sleep 1;dsp_attempt=$((dsp_attempt+1))
+ done
+ return 1
+)
+
+profile_dsp_image_allowed() {
+  case "$1" in
    05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3|ba24759a991e20b0a775b5cb51b8707155f45118ac15a7b73582736dfb858089|bfe204dd8b90f698df1c6107f5f78b300757619dad72e5033e4cf318490289a9) ;;
    ee628997be7f1b6d2b74899a25a4c9715e62dd495e87f75881337ec5aa5efaf8|df149eaacf731ad5a27b487a8aa2a27b10d99983e305a737c511e6b4369f8efc|16910bf1de410f38e84c889f6f424412be482b339509659084284bbb95fe992f|4c1fae4a0eb5bafbda0b19da5f5e5067fc3736f0b35df9d5a57ea5b9705f5dfe|4e7838e2ba87f0968432b8826469c29a9847caa2d231d69ac67487fe3c6bfb8f|11170588cfee87f800deee56789286ddeffbf9e0d597914e09e71cd434fb719f) ;;
-   *) echo 'unrecognized DSP image; diagnostics refused' >&2;exit 1;;
+   cdb67b33ae62e67e4d3cb160870c2c24eaa860fb750426ae8b2e41ca872f0646) ;;
+   *) return 1;;
   esac
+}
+
+profile_activate_experiments() (
+ request="$STATE/dsp-trial.request"
+ [ -e "$request" ] || return 0
+ [ -f "$request" ] && [ ! -L "$request" ] && [ "$("$BB" stat -c '%u:%a' "$request")" = 0:600 ] || return 1
+ IFS=' ' read -r requested_boot expected candidate extra < "$request" || return 1
+ if [ "$requested_boot" != "$(cat /proc/sys/kernel/random/boot_id)" ];then
+  mv "$request" "$request.stale"
+  rm -f "$STATE/experiment-unverified"
+  return 0
+ fi
+ # This exact firmware rejects modified encoder segments before execution.
+ # Keep offline candidate generation separate from an accepted runtime provider.
+ echo 'Shizuka: DSP tuning is unavailable: encoder signature verification rejects modified images.' >&2
+ return 1
+)
+
+profile_tuning_availability() {
+ cat <<'JSON'
+{"schema":1,"runtime_apply_supported":false,"status":"blocked_signature_verification","reason":"This firmware rejects modified DSP encoder images. Additional TTP values can be saved and planned, but cannot currently be applied.","scope":"additional_ttp","stock_dsp_sha256":"05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3","codec_selection_available":true}
+JSON
 }

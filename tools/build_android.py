@@ -161,6 +161,7 @@ def main():
         (bundle / "lib").mkdir(parents=True)
         for path in [
             "config.sh",
+            "playback.sh",
             "status.sh",
             "diagnostics.sh",
             "lib/config.sh",

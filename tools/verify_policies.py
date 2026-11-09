@@ -27,6 +27,8 @@ def verify_policies(android_jar=None):
             "ExtensionConfig",
             "DevicePreferences",
             "CodecPresentation",
+            "PlaybackSelection",
+            "BridgeProtocol",
             "ExtensionConfigStore",
             "ProfileSession",
             "ControlJson",

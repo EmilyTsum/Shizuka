@@ -72,7 +72,14 @@ def native_source(driver, name):
 def offline_sources_fingerprint():
     sources = [
         *(path for path in (ROOT / "src").rglob("*") if path.suffix in {".c", ".cpp", ".h", ".ld"}),
-        *(path for path in (ROOT / "tools").rglob("*") if path.suffix in {".py", ".java"}),
+        # The companion has its own source-bound APK build. A screen-only edit
+        # must not invalidate native encoder tests or trigger a Bluetooth rebuild.
+        *(
+            path for path in (ROOT / "tools").rglob("*")
+            if path.suffix in {".py", ".java"}
+            and not path.is_relative_to(ROOT / "tools/android-app")
+            and path != ROOT / "tools/build_settings_app.py"
+        ),
         *(
             path
             for path in (ROOT / "tests").rglob("*")

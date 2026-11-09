@@ -147,7 +147,9 @@ SECTIONS {
 def build_harness(candidate, manifest, stock, destination, llvm_mc, linker):
     ll_delta_ms = manifest.get("adaptive_ll_delta_ms", 0)
     pieces = compile_patch(manifest["delta_ms"], llvm_mc, linker, ll_delta_ms)
-    expected, expected_manifest = patch_verified(stock, manifest["delta_ms"], pieces, ll_delta_ms)
+    expected, expected_manifest = patch_verified(
+        stock, manifest["delta_ms"], pieces, ll_delta_ms, manifest.get("layout", "legacy_padding")
+    )
     if "control_plan" in manifest:
         if plan_increments(manifest["control_plan"]) != (manifest["delta_ms"], ll_delta_ms):
             raise ValueError("TTP increment differs from the control plan")

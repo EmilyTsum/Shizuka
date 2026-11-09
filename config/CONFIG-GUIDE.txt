@@ -19,7 +19,7 @@ restores only this activation's changes and preserves later user/system changes.
 
 adaptive_hq_ttp_delta_ms=0: saved Adaptive/Lossless HQ TTP intent.
 adaptive_ll_ttp_delta_ms=0: independent Adaptive LL TTP intent.
-Both accept integer 0..100 ms (step 1), default 0. The old aptx_hq_ttp_delta_ms
+HQ accepts 0..150 ms and LL accepts 0..100 ms (step 1), default 0. The old aptx_hq_ttp_delta_ms
 spelling is accepted on input; saves use adaptive_ names. Duplicate aliases fail.
 config.sh tuning capabilities|get|set|plan provides versioned JSON. Capabilities
 come from typed definitions and per-device providers. Adaptive LL playback was

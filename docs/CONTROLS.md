@@ -26,7 +26,7 @@ replay codec preferences when a device connects.
 
 | Canonical key | Integer domain | Current implementation |
 | --- | --- | --- |
-| `adaptive_hq_ttp_delta_ms` | 0..100 ms, step 1, default 0 | DZIF Adaptive HQ and Lossless HQ together; DSP states 3/7 |
+| `adaptive_hq_ttp_delta_ms` | 0..150 ms, step 1, default 0 | DZIF Adaptive HQ and Lossless HQ together; DSP states 3/7 |
 | `adaptive_ll_ttp_delta_ms` | 0..100 ms, step 1, default 0 | DZIF Adaptive LL; DSP states 2/6, independent of HQ |
 
 `aptx_hq_ttp_delta_ms`, `adaptive.hq.ttp_delta_ms` and

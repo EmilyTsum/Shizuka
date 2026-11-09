@@ -10,6 +10,7 @@ from pathlib import Path
 from shizuka.artifacts import read_manifest, verify_native_validation
 from shizuka.profiles import load_profile
 from shizuka.validation import validate_evidence
+from build_settings_app import PACKAGE, VERSION_CODE, settings_sources_fingerprint
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
@@ -26,6 +27,16 @@ def main():
     validate_evidence(tests, profile)
     manifest = read_manifest(profile, BUILD)
     verify_native_validation(profile, BUILD)
+    settings = json.loads((BUILD / "settings-app-build.json").read_text())
+    settings_apk = BUILD / "Shizuka-settings.apk"
+    if (
+        settings.get("schema") != 1
+        or settings.get("package") != PACKAGE
+        or settings.get("version_code") != VERSION_CODE
+        or settings.get("sources_sha256") != settings_sources_fingerprint()
+        or settings.get("apk_sha256") != sha(settings_apk.read_bytes())
+    ):
+        raise ValueError("Settings APK is stale or changed; run tools/build_settings_app.py")
     stage = BUILD / "package"
     diagnostic = json.loads((BUILD / "diagnostics-build.json").read_text())
     if diagnostic != {
@@ -74,6 +85,8 @@ def main():
     (stage / "policy.sha256").write_text(sha((stage / "policy.dex").read_bytes()) + "\n")
     shutil.copy2(BUILD / "dsp-capture", stage / "dsp-capture")
     (stage / "dsp-capture.sha256").write_text(diagnostic["output_sha256"] + "\n")
+    shutil.copy2(settings_apk, stage / "settings.apk")
+    (stage / "settings.sha256").write_text(settings["apk_sha256"] + "\n")
     for src, name in [
         (ROOT / "config/config.example.conf", "config.example.conf"),
         (ROOT / "config/CONFIG-GUIDE.txt", "CONFIG-GUIDE.txt"),
@@ -95,6 +108,8 @@ def main():
             raise SystemExit("Archive verification failed.")
         if "proofs/verified-payloads.sha256" in archive.namelist():
             raise SystemExit("A new build must not inherit an audio verification proof.")
+        if sha(archive.read("settings.apk")) != settings["apk_sha256"]:
+            raise SystemExit("Packaged settings APK hash mismatch.")
         for entry in manifest:
             if sha(archive.read("payload/" + entry["output"])) != entry["output_sha256"]:
                 raise SystemExit("Packaged payload hash mismatch.")

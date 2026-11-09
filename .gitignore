@@ -11,3 +11,7 @@ __pycache__/
 /module/policy.dex
 /module/payloads.sha256
 /module/policy.sha256
+
+/tools/android-app/.gradle/
+/tools/android-app/local.properties
+*.keystore

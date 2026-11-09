@@ -176,11 +176,8 @@ public class BtStatus {
         if (text.isEmpty())
             return out;
         JSONObject t = new JSONObject(text);
-        if (t.optInt("schema") != 2 || !t.optBoolean("running") || !t.optBoolean("available"))
+        if (t.optInt("schema") != 2 || !t.optBoolean("running"))
             return out.put("reason", t.optString("reason", "No current encoder observation"));
-        double age = System.nanoTime() / 1e9 - t.optDouble("monotonic_s", -1);
-        if (!Double.isFinite(age) || age < 0 || age > 3)
-            return out.put("reason", "Last DSP observation is stale");
         String bt = read(moduleRoot.resolve("state/bt.pid").toString());
         String hal = read(moduleRoot.resolve("state/hal.pid").toString());
         if (!bt.matches("[1-9][0-9]+") || !hal.matches("[1-9][0-9]+") ||
@@ -193,6 +190,20 @@ public class BtStatus {
             !read(moduleRoot.resolve("state/hal.start").toString()).equals(t.optString("hal_start")) ||
             !read("/proc/sys/kernel/random/boot_id").equals(t.optString("boot_id")))
             return out.put("reason", "DSP observation belongs to a different session");
+        JSONObject loader = t.optJSONObject("loader");
+        if (loader != null) {
+            double loadAge = System.nanoTime() / 1e9 - loader.optDouble("monotonic_s", -1);
+            if (Double.isFinite(loadAge) && loadAge >= 0 && loadAge <= DspLogDecoder.FRESH_SECONDS) {
+                loader.put("age_seconds", loadAge).put("fresh", true);
+                out.put("loader", loader);
+                return out.put("reason", loader.optString("message", "Encoder module load failed"));
+            }
+        }
+        if (!t.optBoolean("available"))
+            return out.put("reason", t.optString("reason", "No current encoder observation"));
+        double age = System.nanoTime() / 1e9 - t.optDouble("monotonic_s", -1);
+        if (!Double.isFinite(age) || age < 0 || age > 3)
+            return out.put("reason", "Last DSP observation is stale");
         JSONObject fields = t.optJSONObject("fields");
         if (fields == null || fields.length() > 100) return out.put("reason", "Invalid DSP field schema");
         double current = System.nanoTime() / 1e9;
