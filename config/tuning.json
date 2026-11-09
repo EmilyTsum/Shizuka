@@ -4,18 +4,24 @@
     {
       "symbol": "ADAPTIVE_HQ_TTP",
       "key": "adaptive_hq_ttp_delta_ms",
-      "aliases": ["aptx_hq_ttp_delta_ms", "adaptive.hq.ttp_delta_ms", "lossless.hq.ttp_delta_ms"],
+      "aliases": [
+        "aptx_hq_ttp_delta_ms",
+        "adaptive.hq.ttp_delta_ms",
+        "lossless.hq.ttp_delta_ms"
+      ],
       "type": "integer",
       "unit": "ms",
       "default": 0,
       "min": 0,
-      "max": 100,
+      "max": 150,
       "step": 1
     },
     {
       "symbol": "ADAPTIVE_LL_TTP",
       "key": "adaptive_ll_ttp_delta_ms",
-      "aliases": ["adaptive.ll.ttp_delta_ms"],
+      "aliases": [
+        "adaptive.ll.ttp_delta_ms"
+      ],
       "type": "integer",
       "unit": "ms",
       "default": 0,
@@ -32,8 +38,28 @@
         "key": "adaptive_hq_ttp_delta_ms",
         "activation": "offline_dsp_build_then_fresh_graph",
         "contexts": [
-          {"codec": "adaptive", "mode": "hq", "sample_rates_hz": [44100, 48000, 96000], "selection_bits": [24]},
-          {"codec": "lossless", "mode": "hq", "sample_rates_hz": [44100], "selection_bits": [16]}
+          {
+            "codec": "adaptive",
+            "mode": "hq",
+            "sample_rates_hz": [
+              44100,
+              48000,
+              96000
+            ],
+            "selection_bits": [
+              24
+            ]
+          },
+          {
+            "codec": "lossless",
+            "mode": "hq",
+            "sample_rates_hz": [
+              44100
+            ],
+            "selection_bits": [
+              16
+            ]
+          }
         ]
       },
       {
@@ -42,7 +68,18 @@
         "key": "adaptive_ll_ttp_delta_ms",
         "activation": "offline_dsp_build_then_fresh_graph",
         "contexts": [
-          {"codec": "adaptive", "mode": "ll", "sample_rates_hz": [44100, 48000, 96000], "selection_bits": [24]}
+          {
+            "codec": "adaptive",
+            "mode": "ll",
+            "sample_rates_hz": [
+              44100,
+              48000,
+              96000
+            ],
+            "selection_bits": [
+              24
+            ]
+          }
         ]
       }
     ]

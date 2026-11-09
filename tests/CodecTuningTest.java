@@ -13,7 +13,7 @@ public final class CodecTuningTest {
     }
     public static void main(String[] args) {
         ExtensionConfig defaults = ExtensionConfig.defaults();
-        for (String value : Arrays.asList("0", "1", "37", "50", "99", "100")) {
+        for (String value : Arrays.asList("0", "1", "37", "50", "99", "100", "101", "137", "150")) {
             ExtensionConfig config = defaults.with("lossless.hq.ttp_delta_ms", value).with(LL, "23");
             for (String codec : Arrays.asList("adaptive", "lossless")) {
                 Map<String, Object> plan = CodecTuning.plan(config, "samsung-sm-s931z-dzif", codec, "hq", 44100, codec.equals("lossless") ? 16 : 24);
@@ -28,7 +28,7 @@ public final class CodecTuningTest {
             check(operations(ll).get(0).get("key").equals(LL));
             check(ExtensionConfig.parse(config.serialize(), true).value(HQ).equals(value));
         }
-        for (String value : Arrays.asList("-1", "101", "050", "+50", "1.0", "system", "50ms", "2147483648"))
+        for (String value : Arrays.asList("-1", "151", "050", "+50", "1.0", "system", "50ms", "2147483648"))
             rejects(() -> defaults.with(HQ, value));
         // All old spellings resolve to one key and never survive a save/output.
         for (String alias : Arrays.asList("aptx_hq_ttp_delta_ms", "adaptive.hq.ttp_delta_ms", "lossless.hq.ttp_delta_ms")) {

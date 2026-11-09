@@ -39,7 +39,7 @@ deprecated/ignored on this build; increasing maxHQ alone is ineffective.
 
 The experiment adds independent bounded increments to calculated Adaptive HQ
 and Adaptive LL adjustments. Bitrate/frame-size tables and encoder modes remain
-unchanged. Controls accept integer 0..100 ms (step 1); 50/100 remain useful
+unchanged. Controls accept integer HQ 0..150 ms / LL 0..100 ms (step 1); 50/100 remain useful
 comparison stages. Domains and supported contexts are declared in
 `config/tuning.json`, not embedded in the common planner.
 
@@ -124,8 +124,11 @@ SELinux policy, reuse old listening proof or make this a boot default. A bind
 mount by itself does not replace a DSP image already loaded in a running graph.
 Verify a new graph's diagnostic marker and calculated TTP after loading, and
 restore the stock file **and a fresh stock graph** after each timed trial.
-The regular Shizuka rollback does not manage a separate experimental DSP mount;
-this offline tool deliberately does not create one.
+Since 0.9.2, the DZIF runtime backend can consume an explicit, private one-shot
+DSP request. Its mount joins the module lifecycle journal; ordinary manual,
+trial and health rollback unmount it and restart the DSP loader before rebuilding
+the stock audio graph. Standard activation does not infer this request from
+saved tuning intent.
 
 Trial order is stock → +50 → stock → +100 → stock, on the same music and device
 settings. Record HQ44.1 and Lossless44.1 pop count/period and long playback,
@@ -153,3 +156,26 @@ Addresses, image gates and instruction generation are isolated in
 oracle is in `samsung_dzif_verify.py`. Another firmware must register its own
 verified implementation. The shared planner and persistence need no new device
 branch to expose another provider or integer control.
+
+## Explicit +150 ms device trial (0.9.2)
+
+HQ/Lossless accepts 0..150 ms; Adaptive LL remains 0..100 ms. The +150/LL0
+candidate is SHA-256
+`ed7ab35d40bfe15e1fa09d08467ac8257f78b149afe41f50fe5620cc9a389dd1`.
+Another 100 candidates (HQ 101..150 with LL0/100) passed 234,336 actual-byte
+vectors on the Mac-local VM. This validates arithmetic/ABI, not audible quality.
+
+After offline verification, root can stage an approved candidate as a read-only,
+root-owned file at `/data/adb/shizuka/dsp-trials/trial-UUID/aptx_adaptive_enc_module.so.1`.
+All three private directories must be root-owned mode 0700, and the file mode
+0444. The explicit module `state/dsp-trial.request` is root-owned mode 0600 and
+contains exactly `BOOT_UUID SHA256 ABSOLUTE_CANDIDATE_PATH` on one line. Another
+boot retires the request without applying it. This is an experimental internal
+activation boundary, not an arbitrary-image or unverified firmware loader.
+
+During activation the generic lifecycle calls an optional backend hook after
+Bluetooth is OFF. The backend rechecks the original image and approved candidate,
+journals before mounting in init's namespace, resets the DSP loader, confirms
+the new loader sees the candidate, and consumes the request. The existing timed
+module rollback remains armed. Missing requests do nothing. Saving a tuning
+value, normal boot or standard activation alone never stages a DSP image.

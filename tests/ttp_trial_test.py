@@ -37,7 +37,7 @@ class TtpTrialGuards(unittest.TestCase):
 
     def test_only_explicit_stages_are_accepted(self):
         with patch.object(ttp.subprocess, "run") as run:
-            for value in (-50, 101, 1000, True, 50.0, "50", None):
+            for value in (-50, 151, 1000, True, 50.0, "50", None):
                 with self.assertRaisesRegex(ValueError, "Invalid"):
                     ttp.compile_patch(value, "not-run", "not-run")
             run.assert_not_called()

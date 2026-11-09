@@ -134,6 +134,10 @@ rollback() (
  fi
  restore_properties || return 1
  previous_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
+ # Device experiments may need their loader reset after their owned mounts are removed.
+ if command -v profile_recover_experiments >/dev/null 2>&1;then
+  profile_recover_experiments || return 1
+ fi
  setprop ctl.restart "$AUDIO_HAL_SERVICE"
  hal_wait=0
  while [ "$hal_wait" -lt 20 ];do
@@ -226,6 +230,9 @@ case "${1:-status}" in
     echo "$target_pid $nsid $APK" >> "$STATE/mounts.tsv"
    fi
   done
+  if command -v profile_activate_experiments >/dev/null 2>&1;then
+   profile_activate_experiments || fail 'device experiment activation failed'
+  fi
   profile_apply_properties
   old_bt=$(host_bt || true)
   old_hal=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")

@@ -31,6 +31,9 @@ class Lifecycle(unittest.TestCase):
 a = sys.argv[1:]
 if a[:3] == ["stat", "-c", "%u"]:
     print(os.environ.get("TEST_OWNER", "0"))
+elif a[:3] == ["stat", "-c", "%u:%a"]:
+    import stat
+    print(os.environ.get("TEST_OWNER", "0") + ":" + format(stat.S_IMODE(pathlib.Path(a[3]).stat().st_mode), "o"))
 elif a[0] == "flock":
     # Use a real inherited-FD lock, also on hosts without the flock utility.
     fcntl.flock(int(a[1]), fcntl.LOCK_EX)
@@ -674,6 +677,49 @@ else:
             ok=False,
         )
         self.assertTrue((self.state / "armed").exists())
+
+    def test_stale_dsp_request_is_retired_without_device_operations(self):
+        request = self.state / "dsp-trial.request"
+        request.write_text("previous-boot deadbeef /untrusted/path\n")
+        request.chmod(0o600)
+        self.run_shell(
+            'nsrun() { touch "$MODDIR/mutation"; return 1; }\n'
+            'setprop() { touch "$MODDIR/mutation"; return 1; }\nprofile_activate_experiments'
+        )
+        self.assertFalse(request.exists())
+        self.assertTrue(request.with_suffix(".request.stale").exists())
+        self.assertFalse((self.d / "mutation").exists())
+
+    def test_bad_dsp_candidate_is_rejected_before_device_operations(self):
+        boot = pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        request = self.state / "dsp-trial.request"
+        request.write_text(boot + " deadbeef /shared-storage/candidate.so\n")
+        request.chmod(0o600)
+        self.run_shell(
+            'nsrun() { touch "$MODDIR/mutation"; return 1; }\n'
+            'setprop() { touch "$MODDIR/mutation"; return 1; }\nprofile_activate_experiments',
+            ok=False,
+        )
+        self.assertTrue(request.exists())
+        self.assertFalse((self.d / "mutation").exists())
+
+    def test_dsp_recovery_keeps_marker_until_stock_and_restart_succeed(self):
+        marker = self.state / "dsp-trial.active"
+        marker.write_text("owned trial\n")
+        self.run_shell(
+            "nsrun() { echo unknown; }\n"
+            'setprop() { touch "$MODDIR/mutation"; return 1; }\nprofile_recover_experiments',
+            ok=False,
+        )
+        self.assertTrue(marker.exists())
+        self.assertFalse((self.d / "mutation").exists())
+        stock = "05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3"
+        self.run_shell(
+            "nsrun() { echo " + stock + "; }\ngetprop() { echo 1; }\n"
+            "setprop() { return 1; }\nprofile_recover_experiments",
+            ok=False,
+        )
+        self.assertTrue(marker.exists())
 
     def test_all_module_scripts_have_valid_shell_syntax(self):
         for script in (ROOT / "module").rglob("*.sh"):

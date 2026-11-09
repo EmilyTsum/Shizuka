@@ -60,3 +60,10 @@ Other acquisition ABIs need their own collector and decoder provider.
 Host Linux-only suites can run in a local Linux VM on macOS. On 2026-11-09 the
 new TTP candidates and their Hexagon harnesses were built on the Mac and executed
 in a QEMU HVF VM on that same Mac. mn-core-01 is no longer used for this work.
+
+Explicit device experiments may implement `profile_activate_experiments` and
+`profile_recover_experiments`. The common lifecycle calls activation with radio
+OFF and the watchdog already armed; recovery runs after journaled mounts are
+removed and before restarting the HAL. Device code must stage only approved
+images, journal before publication, retire cross-boot requests and rebuild a
+stock graph on recovery. No experiment is inferred from a saved tuning value.
