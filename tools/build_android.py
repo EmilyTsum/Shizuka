@@ -145,6 +145,8 @@ def build_status(tools, android):
             str(ANDROID / "BtStatus.java"),
             str(ANDROID / "BluetoothRuntime.java"),
             str(ANDROID / "CodecPresentation.java"),
+            str(ANDROID / "ProfileSession.java"),
+            str(ANDROID / "BluetoothProfiles.java"),
         ],
         check=True,
     )

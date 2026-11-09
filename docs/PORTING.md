@@ -4,7 +4,7 @@ The included native patch is verified against the SM-S931Z DZIF stock inputs. Mo
 
 | Layer | Location | Responsibility |
 | --- | --- | --- |
-| Android helpers | `tools/android/` | System preferences, extension configuration, service bootstrap, read-only status and optional controller policy. |
+| Android helpers | `tools/android/` | System preferences, extension configuration, shared profile discovery/cleanup, read-only status and optional controller policy. |
 | Shared codec interfaces/logic | `src/` | Codec negotiation and bridge interfaces. Existing private ABI tags remain stable. |
 | Native device implementation | `src/backends/samsung_dzif/` | Firmware-specific memory layout, JNI integration, callbacks and linker layout. |
 | Native patch builder | `tools/shizuka/backends/` | Hook offsets, trampolines, binary patching, host case matrix and dispatch verification. |
@@ -18,6 +18,8 @@ The included native patch is verified against the SM-S931Z DZIF stock inputs. Mo
 `SHIZUKA_PROFILE` selects a registered profile name or an explicit profile JSON path. The default is `samsung-sm-s931z-dzif`. `SHIZUKA_INPUTS` selects the stock-input directory; `SHIZUKA_NDK_BIN` selects the NDK LLVM bin directory. `SHIZUKA_BUILD_TOOLS` defaults to 35.0.0. `SHIZUKA_RATE`, `SHIZUKA_MODE`, and `SHIZUKA_R2` are validated backend build options, not stored per-device preferences. The old `S25_*` counterparts remain compatibility aliases; canonical values win.
 
 The existing module ID stays `s25_aptx_adaptive` so an upgrade does not install another concurrent native module. Archive names include the selected runtime profile and module version.
+
+`ProfileSession` owns one invocation's proxy handles and discovery state without Android dependencies. `BluetoothProfiles` adapts Android callbacks/timeouts to that session on the main event loop; both device settings and status use it. This boundary can be tested without a phone and does not add another preference store or change codec routing.
 
 ## Adding native support
 

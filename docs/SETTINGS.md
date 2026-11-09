@@ -26,6 +26,10 @@ sh /data/adb/modules/s25_aptx_adaptive/config.sh device AA:BB:CC:DD:EE:FF option
 
 Status retains the codec name reported by Android. Private Lossless/LL IDs, Adaptive mode words and DSP session matching are interpreted only for the verified Samsung backend; an unknown codec's numeric fields are not labeled HQ or low latency by guesswork.
 
+Settings and status share a one-shot profile session. Discovery completes when all requested profiles settle or the existing deadline expires (3 seconds for device settings, 2.5 seconds for status). Unsupported or failed profiles do not discard other connected profiles. Missing services report `unavailable:unsupported`, `unavailable:timeout` or `unavailable:disconnected`; permission failures retain their exception type. A write that requires an unavailable profile fails without saving a plugin fallback.
+
+Android callbacks are handled on the main event loop. After discovery completes, late callbacks cannot replace the snapshot; their new proxies are released. Disconnected handles are retained for cleanup, duplicate callbacks do not close a live proxy, and a close failure is reported while cleanup continues for the others. Status serializes its result after cleanup so those diagnostics appear in the snapshot. This session holds no persistent device state.
+
 ## Extension file
 
 The optional canonical path is `/data/adb/shizuka/config.conf`. Defaults:

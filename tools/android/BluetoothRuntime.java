@@ -21,7 +21,9 @@ final class BluetoothRuntime {
         Object thread = activity.getMethod("systemMain").invoke(null);
         Context context = ((Context)activity.getMethod("getSystemContext").invoke(thread))
                               .createPackageContext("com.android.shell", 0);
-        BluetoothAdapter adapter = context.getSystemService(BluetoothManager.class).getAdapter();
+        BluetoothManager bluetooth = context.getSystemService(BluetoothManager.class);
+        if (bluetooth == null) throw new IllegalStateException("Bluetooth service unavailable");
+        BluetoothAdapter adapter = bluetooth.getAdapter();
         if (adapter == null) throw new IllegalStateException("Bluetooth adapter unavailable");
         return new BluetoothRuntime(context, adapter);
     }

@@ -10,6 +10,7 @@ POLICY_CASES = (
     ("system_preferences", "SystemPreferencesTest"),
     ("codec_presentation", "CodecPresentationTest"),
     ("extension_store", "ExtensionConfigStoreTest"),
+    ("profile_session", "ProfileSessionTest"),
 )
 PYTHON_CASES = (
     ("qhs_nvm", "qhs_nvm_test.py"),
