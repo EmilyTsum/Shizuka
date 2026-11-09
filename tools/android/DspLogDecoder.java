@@ -25,6 +25,7 @@ final class DspLogDecoder {
     private void put(String key, Object value, String unit, String source, double time) {
         if (key.length() > 80 || (!fields.containsKey(key) && fields.size() >= 80)) return;
         fields.put(key, new Field(value, unit, source, time));
+        encoderTime = time; // Fresh recognized DSP data, including legacy TTP without R3 packet summaries.
     }
     private static Matcher match(String regex, String text) {
         return PATTERNS.computeIfAbsent(regex, key -> Pattern.compile(key, Pattern.MULTILINE)).matcher(text);
@@ -123,8 +124,10 @@ final class DspLogDecoder {
         for (Map.Entry<String, Field> item : fields.entrySet()) {
             Field f = item.getValue();
             double age = now - f.time;
+            boolean epochField = item.getKey().equals("sample_rate_hz");
             values.put(item.getKey(), ControlJson.object("value", f.value, "unit", f.unit, "source", f.source,
-                "monotonic_s", f.time, "age_seconds", age, "fresh", age >= 0 && age <= FRESH_SECONDS));
+                "monotonic_s", f.time, "age_seconds", age, "scope", epochField ? "encoder_epoch" : "dynamic",
+                "fresh", age >= 0 && (epochField || age <= FRESH_SECONDS)));
         }
         double age = now - encoderTime;
         return ControlJson.object("schema", 2, "available", encoderTime >= 0 && age >= 0 && age <= FRESH_SECONDS,

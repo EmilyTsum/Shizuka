@@ -59,6 +59,14 @@ public final class DspLogDecoderTest {
         d.contextChanged("Android context changed");
         check(d.snapshot(3.2).get("available").equals(false));
         check(field(d, "encoder_lossless", 3.2) == null);
+        DspLogDecoder legacy = new DspLogDecoder();
+        legacy.accept(10, "CAPI V2 APTX_ADAPTIVE_ENC: set-param Wrapper - me->linkState.sampleRate is 96000");
+        legacy.accept(20, "CAPI V2 APTX ADAPTIVE ENC Calculated ttpadj: ttpadj microseconds 197000");
+        check(legacy.snapshot(20).get("available").equals(true));
+        check(field(legacy, "sample_rate_hz", 20).get("fresh").equals(true));
+        check(field(legacy, "sample_rate_hz", 20).get("age_seconds").equals(10.0));
+        check(field(legacy, "encoder_lossless", 20) == null);
+        check(legacy.snapshot(24).get("available").equals(false));
         for (double bad : new double[] {Double.NaN, Double.POSITIVE_INFINITY, -1}) {
             try { d.accept(bad, "APTX"); throw new AssertionError(); } catch (IllegalArgumentException expected) { assertions++; }
         }

@@ -1,5 +1,10 @@
 # HQ / Lossless TTP experiment
 
+The [shared control API](CONTROLS.md) can now generate a versioned plan for this
+builder. [Opt-in diagnostics](DIAGNOSTICS.md) provides a path for collecting the
+existing target/TTP/state logs once device validation is available. Saved intent
+still does not install or hot-apply a candidate.
+
 Status: offline candidates only. Nothing is mounted automatically, and these
 DSP images are **not included in the KernelSU module**. The user deferred
 listening on 2026-11-09. The connected phone still uses its unmodified DSP image;

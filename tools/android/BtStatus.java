@@ -199,7 +199,8 @@ public class BtStatus {
         for (Iterator<String> keys = fields.keys(); keys.hasNext();) {
             String key = keys.next(); JSONObject field = fields.getJSONObject(key);
             double fieldAge = current - field.optDouble("monotonic_s", -1);
-            boolean fresh = Double.isFinite(fieldAge) && fieldAge >= 0 && fieldAge <= DspLogDecoder.FRESH_SECONDS;
+            boolean epochField = "sample_rate_hz".equals(key) && "encoder_epoch".equals(field.optString("scope"));
+            boolean fresh = Double.isFinite(fieldAge) && fieldAge >= 0 && (epochField || fieldAge <= DspLogDecoder.FRESH_SECONDS);
             field.put("age_seconds", fieldAge).put("fresh", fresh);
             t.remove(key);
             if (fresh && !field.isNull("value")) t.put(key, field.get("value"));

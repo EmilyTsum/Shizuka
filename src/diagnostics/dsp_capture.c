@@ -24,7 +24,7 @@
 #define CAPACITY (RING_SIZE - 4)
 #define MAX_MESSAGE 8192
 #define WATCHED "audioadsprpcd.farf"
-static const char farf_config[] = "0x00000004 aptx-adaptive-param-r3.c,aptx-adadptive-ctl-r3.c,capi_aptx_adaptive_enc_utils.cpp,capi_aptx_adaptive_encoder.c,capi_aptx_adaptive_encoder_r3.c\n";
+static const char farf_config[] = "0x00000004 aptx-adaptive-param-r3.c,aptx-adadptive-ctl-r3.c,capi_aptx_adaptive_enc_utils.cpp,capi_aptx_adaptive_encoder.c,capi_aptx_adaptive_encoder_r3.c,capi_aptx_adaptive_encoder_wrappers.c\n";
 static volatile sig_atomic_t stopped;
 static void stop_capture(int signal_number) { (void)signal_number; stopped = 1; }
 static double monotonic(void) {

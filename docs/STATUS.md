@@ -1,5 +1,6 @@
 # Status
 
+- 0.9.0-test adds opt-in bounded stock DSP log collection, structured/private exports, freshness/session-aware status and a shared internal/CLI codec tuning API. Tuning plans feed the offline TTP builder; saving intent is not runtime application. The screen remains provisional for a later One UI design. New capture/playback/boot behavior is not phone-tested; see [DIAGNOSTICS.md](DIAGNOSTICS.md) and [CONTROLS.md](CONTROLS.md).
 - PRs #2 and #3 were merged on 2026-11-09. Their combined tree passed all 22 then-required host suites, exact Android/APK/native builds, ARM64 dispatch and read-only settings/status on the phone. The installed generation remains 0.8.1; this does not add 0.8.2 handoff listening evidence.
 - HQ/Lossless TTP +50/+100 ms experiments are offline-only and excluded from normal module payloads. The exact phone DSP contradicts the handover's table/target addresses; the candidates add a bounded increment to the calculated adjustment instead. Both actual instruction harnesses passed 1,920 vectors on Linux QEMU. Fresh live three-mode targets, loader acceptance, receiver delay and poor-link listening are pending; see [TTP-TRIAL.md](TTP-TRIAL.md).
 

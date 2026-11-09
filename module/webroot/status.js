@@ -28,6 +28,10 @@ function execStatus() {
 function numbers(values, suffix) {
     return Array.isArray(values) && values.length ? values.map((n) => String(n) + suffix).join(" / ") : "Not reported";
 }
+function freshField(key, field, elapsed) {
+    const age = Number(field.age_seconds) + elapsed;
+    return field.fresh && Number.isFinite(age) && age >= 0 && ((key === "sample_rate_hz" && field.scope === "encoder_epoch") || age <= 3);
+}
 function renderDsp(dsp, elapsed = 0) {
     const age = Number(dsp.age_seconds) + elapsed;
     const available = dsp.available && Number.isFinite(age) && age >= 0 && age <= 3;
@@ -38,7 +42,7 @@ function renderDsp(dsp, elapsed = 0) {
     const value = (key) => {
         if (!dsp.fields) return dsp[key];
         const field = dsp.fields[key];
-        return field && field.fresh && field.age_seconds + elapsed <= 3 ? field.value : null;
+        return field && freshField(key, field, elapsed) ? field.value : null;
     };
     text("encoder", value("encoder_state") || "Not reported");
     text("quality", String(value("quality_level") ?? "?") + " / " + String(value("qhs") ?? "?"));
@@ -50,7 +54,7 @@ function renderDsp(dsp, elapsed = 0) {
     const lossless = value("encoder_lossless");
     text("dsp-lossless", lossless === true ? "Observed Lossless encoder state" : lossless === false ? "Observed other encoder state" : "Not observed");
     const fields = {};
-    Object.entries(dsp.fields || {}).forEach(([key, field]) => { fields[key] = {...field, age_seconds: field.age_seconds + elapsed, fresh: field.fresh && field.age_seconds + elapsed <= 3}; });
+    Object.entries(dsp.fields || {}).forEach(([key, field]) => { fields[key] = {...field, age_seconds: field.age_seconds + elapsed, fresh: freshField(key, field, elapsed)}; });
     text("dsp-fields", JSON.stringify(fields, null, 2));
     text("age", age.toFixed(1) + " s");
 }
@@ -62,8 +66,9 @@ function statusForCopy() {
         out.dsp.age_seconds += elapsed;
         out.dsp.available = out.dsp.age_seconds >= 0 && out.dsp.age_seconds <= 3;
         Object.entries(out.dsp.fields || {}).forEach(([key, field]) => {
+            const fresh = freshField(key, field, elapsed);
             field.age_seconds += elapsed;
-            field.fresh = field.fresh && field.age_seconds <= 3;
+            field.fresh = fresh;
             if (!field.fresh) delete out.dsp[key];
         });
     }
