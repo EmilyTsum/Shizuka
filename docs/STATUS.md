@@ -1,5 +1,8 @@
 # Status
 
+- PRs #2 and #3 were merged on 2026-11-09. Their combined tree passed all 22 then-required host suites, exact Android/APK/native builds, ARM64 dispatch and read-only settings/status on the phone. The installed generation remains 0.8.1; this does not add 0.8.2 handoff listening evidence.
+- HQ/Lossless TTP +50/+100 ms experiments are offline-only and excluded from normal module payloads. The exact phone DSP contradicts the handover's table/target addresses; the candidates add a bounded increment to the calculated adjustment instead. Both actual instruction harnesses passed 1,920 vectors on Linux QEMU. Fresh live three-mode targets, loader acceptance, receiver delay and poor-link listening are pending; see [TTP-TRIAL.md](TTP-TRIAL.md).
+
 - 0.8.2-test is an offline candidate: explicit LE disable prepares an allowed, connected A2DP output and confirms it before removing LE with a fallback indication. It does not force-enable Classic or resume a paused player. Phone/listening validation is pending. The Samsung Call/Audio switch behavior was inspected but is not changed; see [LE-CLASSIC-HANDOFF.md](LE-CLASSIC-HANDOFF.md).
 
 - 0.8.1-test makes the DZIF Classic-active prerequisite respect Android's connection policy: a forbidden Classic profile does not prevent LE activation. The APK passes 12 helper and 2,592 active-gate cases; allowed/unknown policies retain the stock active-device checks. On-device LE activation and LC3 48 kHz/16-bit playback were observed, and the user confirmed LC3 playback. A Classic-forbidden trial also encountered LE CIS/ACL timeouts; the final heard session had A2DP and headset policies allowed. This is not a verified fix for every LE-only connection failure. Full kernel/DFRoot reboot remains untested.

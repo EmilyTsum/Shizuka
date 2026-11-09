@@ -10,6 +10,8 @@ Use Android Bluetooth Settings and Developer Options for codec/device preference
 
 The KernelSU WebUI shows the current media route and Android codec selection. Lossless selection does not confirm actual lossless transmission. Historical measurements and known issues are in [STATUS.md](docs/STATUS.md) and [QHS.md](docs/QHS.md).
 
+An optional, offline [HQ/Lossless TTP experiment](docs/TTP-TRIAL.md) can build stock, +50 ms and +100 ms DSP candidates for the exact S25 image. It is excluded from normal module payloads and has no automatic device activation; receiver/audio validation is pending.
+
 ## Build
 
 Requirements: Python 3.10+, a host C++17 compiler, JDK 17+ with JNI headers, Android SDK platform 35/build-tools 35.0.0, and NDK 26.1.10909125. The Samsung APK backend also requires apktool 3.0.3.

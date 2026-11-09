@@ -13,6 +13,7 @@ POLICY_CASES = (
     ("profile_session", "ProfileSessionTest"),
 )
 PYTHON_CASES = (
+    ("ttp_trial_guards", "ttp_trial_test.py"),
     ("apk_handoff", "apk_handoff_check.py"),
     ("apk_le_route", "apk_le_route_check.py"),
     ("qhs_nvm", "qhs_nvm_test.py"),
