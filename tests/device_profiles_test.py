@@ -426,6 +426,13 @@ class Profiles(unittest.TestCase):
         package = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(package)
         package.ROOT, package.BUILD, package.DIST = repository, self.d, self.d / "dist"
+        (self.d / "Shizuka-settings.apk").write_bytes(b"synthetic companion APK fixture")
+        package.settings_sources_fingerprint = lambda: "synthetic-settings-sources"
+        (self.d / "settings-app-build.json").write_text(json.dumps({
+            "schema": 1, "package": package.PACKAGE, "version_code": package.VERSION_CODE,
+            "sources_sha256": "synthetic-settings-sources",
+            "apk_sha256": digest(self.d / "Shizuka-settings.apk"),
+        }))
         with self.assertRaises(ValueError):
             package.main()
         self.assertFalse(package.DIST.exists())
@@ -443,6 +450,9 @@ class Profiles(unittest.TestCase):
                     "policy.dex",
                     "status.dex",
                     "proofs/offline-ready",
+                    "settings.apk",
+                    "settings.sha256",
+                    "settings-bridge.sh",
                 }.issubset(names)
             )
             self.assertEqual(
@@ -460,6 +470,10 @@ class Profiles(unittest.TestCase):
                 }.intersection(names)
             )
             self.assertIsNone(archive.testzip())
+            self.assertEqual(archive.read("settings.apk"), b"synthetic companion APK fixture")
+        (self.d / "Shizuka-settings.apk").write_bytes(b"changed after build")
+        with self.assertRaisesRegex(ValueError, "Settings APK is stale"):
+            package.main()
 
 
 if __name__ == "__main__":
