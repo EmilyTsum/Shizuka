@@ -21,9 +21,12 @@ public class BtStatus {
     static final JSONArray errors = new JSONArray();
     static boolean finished;
     static Handler handler;
+    static Path moduleRoot;
+    static final Path DATA = Paths.get("/data/adb/shizuka");
+    static final Path LEGACY_DATA = Paths.get("/data/adb/s25_bluetooth");
     static Object call(Object target, String name, Class<?>[] types, Object... args)
         throws Exception {
-        return target.getClass().getMethod(name, types).invoke(target, args);
+        return BluetoothRuntime.call(target, name, types, args);
     }
     static Object get(Object target, String name) throws Exception {
         return call(target, name, new Class<?>[] {});
@@ -53,6 +56,9 @@ public class BtStatus {
         }
         return new JSONArray(values);
     }
+    static String deviceProfile() throws Exception {
+        return moduleRoot == null ? "" : read(moduleRoot.resolve("device-profile").toString());
+    }
     static JSONObject codec(Object c, boolean le) throws Exception {
         JSONObject j = new JSONObject();
         if (c == null)
@@ -60,30 +66,23 @@ public class BtStatus {
         j.put("available", true);
         int type = ((Number)get(c, "getCodecType")).intValue();
         j.put("type", type);
-        String name;
-        if (!le && type == 12)
-            name = "aptX Lossless (selection)";
-        else if (!le && type == 13)
-            name = "aptX LL";
-        else {
-            try {
-                name = String.valueOf(get(c, "getCodecName"));
-            } catch (NoSuchMethodException e) {
-                Matcher match = Pattern.compile("codecName[:=]([^,}\\]]+)").matcher(c.toString());
-                name = match.find() ? match.group(1).trim() : "Codec " + type;
-            }
+        String profile = deviceProfile();
+        String name = null;
+        try {
+            name = (String)get(c, "getCodecName");
+        } catch (UnsupportedOperationException e) {
+            Matcher match = Pattern.compile("codecName[:=]([^,}\\]]+)").matcher(c.toString());
+            if (match.find()) name = match.group(1).trim();
         }
-        j.put("name", name);
+        j.put("lossless_selection", CodecPresentation.losslessSelection(profile, le, type));
+        j.put("name", CodecPresentation.name(profile, le, type, name));
         int rate = ((Number)get(c, "getSampleRate")).intValue();
         int bits = ((Number)get(c, "getBitsPerSample")).intValue();
         j.put("sample_rates_hz", numericFlags(c, "SAMPLE_RATE_", rate));
         j.put("bit_depths", numericFlags(c, "BITS_PER_SAMPLE_", bits));
         if (!le) {
             long mode = ((Number)get(c, "getCodecSpecific1")).longValue();
-            j.put("mode", type == 12     ? "Lossless request"
-                          : mode == 4096 ? "HQ"
-                          : mode == 8192 ? "Low latency"
-                                         : "Default");
+            j.put("mode", CodecPresentation.mode(profile, type, mode));
         } else {
             int duration = ((Number)get(c, "getFrameDuration")).intValue();
             j.put("frame_durations_us", numericFlags(c, "FRAME_DURATION_", duration));
@@ -130,6 +129,7 @@ public class BtStatus {
             return out;
         List<?> devices =
             (List<?>)call(adapter, "getActiveDevices", new Class<?>[] {int.class}, id);
+        if (devices == null) return out;
         for (Object one : devices) {
             if (!(one instanceof BluetoothDevice))
                 continue;
@@ -172,15 +172,18 @@ public class BtStatus {
     static JSONObject telemetry(JSONObject route, JSONArray devices) throws Exception {
         JSONObject out =
             new JSONObject().put("available", false).put("reason", "Diagnostics are not running");
-        String text = read("/data/adb/s25_bluetooth/telemetry.json");
+        if (!CodecPresentation.SAMSUNG_DZIF.equals(deviceProfile())) return out;
+        Path telemetry = DATA.resolve("telemetry.json");
+        if (!Files.exists(telemetry)) telemetry = LEGACY_DATA.resolve("telemetry.json");
+        String text = read(telemetry.toString());
         if (text.isEmpty())
             return out;
         JSONObject t = new JSONObject(text);
         double age = System.nanoTime() / 1e9 - t.optDouble("monotonic_s", -1);
         if (!Double.isFinite(age) || age < 0 || age > 3)
             return out.put("reason", "Last DSP observation is stale");
-        String bt = read("/data/adb/modules/s25_aptx_adaptive/state/bt.pid");
-        String hal = read("/data/adb/modules/s25_aptx_adaptive/state/hal.pid");
+        String bt = read(moduleRoot.resolve("state/bt.pid").toString());
+        String hal = read(moduleRoot.resolve("state/hal.pid").toString());
         if (!bt.matches("[1-9][0-9]+") || !hal.matches("[1-9][0-9]+") ||
             !Files.isDirectory(Paths.get("/proc", bt)) ||
             !Files.isDirectory(Paths.get("/proc", hal)) ||
@@ -254,16 +257,11 @@ public class BtStatus {
     }
     public static void main(String[] args) {
         try {
-            Looper.prepareMainLooper();
-            Class<?> manager = Class.forName("android.os.BluetoothServiceManager");
-            Class.forName("android.bluetooth.BluetoothFrameworkInitializer")
-                .getMethod("setBluetoothServiceManager", manager)
-                .invoke(null, manager.getConstructor().newInstance());
-            Class<?> at = Class.forName("android.app.ActivityThread");
-            Object thread = at.getMethod("systemMain").invoke(null);
-            context = ((Context)at.getMethod("getSystemContext").invoke(thread))
-                          .createPackageContext("com.android.shell", 0);
-            adapter = context.getSystemService(BluetoothManager.class).getAdapter();
+            if (args.length > 1) throw new IllegalArgumentException("optional module root only");
+            moduleRoot = args.length == 1 ? Paths.get(args[0]) : null;
+            BluetoothRuntime runtime = BluetoothRuntime.connect();
+            context = runtime.context;
+            adapter = runtime.adapter;
             handler = new Handler(Looper.getMainLooper());
             if (adapter == null || !adapter.isEnabled()) {
                 finish();

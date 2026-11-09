@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Bounded LL private9 veneers and original Adaptive private5 dispatch."""
 
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from elf_query import Binary
+from shizuka.project import inputs_dir
 
 root = Path(__file__).resolve().parents[1]
-old = Binary(Path(os.environ.get("S25_BASE_BIN", str(root / "inputs"))) / "libbluetooth_jni.so")
+old = Binary(inputs_dir() / "libbluetooth_jni.so")
 new = Binary(root / "build/patched-libbluetooth_jni.so")
 
 
@@ -48,9 +48,7 @@ for start, size, adaptive, target, gate, match, resume in [
     # Raising the offload bound from 2 to 3 sends aptX HD into the low-codec arm.
     original_cmp = list(old.md.disasm(old.read(gate, 4), gate))[0]
     assert original_cmp.mnemonic == "cmp"
-    assert bytes(ins[3].bytes) == old.read(gate, 4), (
-        hex(gate), ins[3].op_str, original_cmp.op_str
-    )
+    assert bytes(ins[3].bytes) == old.read(gate, 4), (hex(gate), ins[3].op_str, original_cmp.op_str)
     assert ins[4].mnemonic == "b" and ins[4].operands[0].imm == resume
     print(
         hex(gate),

@@ -23,13 +23,15 @@ function render(route, devices, dsp = {available: false}) {
     sandbox.snapshot = {bluetooth_enabled: true, collected_at_ms: 1, route: {transport: route, audio_mode: 0}, devices, dsp};
     vm.runInContext('render(snapshot)', sandbox);
 }
-const a2dp = {transport: 'A2DP', device: '<receiver>', stream_started: true, codec: {available: true, name: 'aptX Lossless (selection)', type: 12, sample_rates_hz: [44100], bit_depths: [16], mode: 'Lossless request'}};
+const a2dp = {transport: 'A2DP', device: '<receiver>', stream_started: true, codec: {available: true, name: 'aptX Lossless (selection)', type: 12, lossless_selection: true, sample_rates_hz: [44100], bit_depths: [16], mode: 'Lossless request'}};
 render('A2DP', [a2dp]);
 assert.equal(element('bits').textContent, '16 bit');
 assert.match(element('selection-note').textContent, /does not.*confirm lossless/);
 assert.equal(element('device').textContent, '<receiver>');
 assert.equal(element('stream').textContent, 'Set');
 assert.equal(element('audio-mode').textContent, 'Normal');
+render('A2DP', [{...a2dp, codec: {...a2dp.codec, name: 'Another codec', lossless_selection: false}}]);
+assert.doesNotMatch(element('selection-note').textContent, /Lossless is selected/);
 render('A2DP', [{...a2dp, stream_started: false}]);
 assert.equal(element('stream').textContent, 'Clear');
 const le = {transport: 'LE Audio', device: 'Earbuds', codec: {available: true, name: 'LC3', type: 0, sample_rates_hz: [48000], bit_depths: [32], frame_durations_us: [10000]}};

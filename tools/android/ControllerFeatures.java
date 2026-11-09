@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothManager;
-import android.content.Context;
-import android.os.Looper;
 import java.lang.reflect.*;
 import java.util.Collections;
 import java.util.Set;
@@ -20,16 +17,7 @@ public final class ControllerFeatures {
         return out.toString();
     }
     static BluetoothAdapter setup() throws Exception {
-        Looper.prepareMainLooper();
-        Class<?> manager = Class.forName("android.os.BluetoothServiceManager");
-        Class.forName("android.bluetooth.BluetoothFrameworkInitializer")
-            .getMethod("setBluetoothServiceManager", manager)
-            .invoke(null, manager.getConstructor().newInstance());
-        Class<?> at = Class.forName("android.app.ActivityThread");
-        Object thread = at.getMethod("systemMain").invoke(null);
-        Context context = ((Context)at.getMethod("getSystemContext").invoke(thread))
-                              .createPackageContext("com.android.shell", 0);
-        return context.getSystemService(BluetoothManager.class).getAdapter();
+        return BluetoothRuntime.connect().adapter;
     }
     public static void main(String[] args) {
         if (android.os.Process.myUid() != 0 || args.length != 0) {

@@ -41,5 +41,13 @@
     "downstream-parser",
     "hci-adaptive-selected"
   ],
-  "live_activation_ready": false
+  "live_activation_ready": false,
+  "driver": "samsung-dzif",
+  "runtime_profile": "samsung-sm-s931z-dzif",
+  "payloads": {
+    "native": "patched-libbluetooth_jni.so",
+    "hal": "patched-libsehbluetooth_audio_session_aidl.so",
+    "apk": "patched-Bluetooth.apk",
+    "properties": "runtime.prop"
+  }
 }

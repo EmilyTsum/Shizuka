@@ -4,10 +4,12 @@
 set -eu
 MODDIR=${0%/*}
 BB=/data/adb/ksu/bin/busybox
+STATE="$MODDIR/state"
+. "$MODDIR/lib/runtime.sh"
 rm -f "$MODDIR/.no-auto"
 if [ ! -f "$MODDIR/proofs/verified-payloads.sha256" ] || ! "$BB" cmp -s "$MODDIR/payloads.sha256" "$MODDIR/proofs/verified-payloads.sha256";then
- if [ -f "$MODDIR/state/active" ];then
-  "$BB" sh "$MODDIR/control.sh" status && exit 0
+ if recovery_pending;then
+  if [ -f "$STATE/active" ];then "$BB" sh "$MODDIR/control.sh" status && exit 0;fi
   "$BB" sh "$MODDIR/control.sh" rollback
  fi
  "$BB" sh "$MODDIR/control.sh" preflight

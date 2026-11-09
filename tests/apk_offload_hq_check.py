@@ -81,7 +81,9 @@ def execute(body, codec, prefs, status_present=True, config_present=True):
 def main():
     patch = next(
         x
-        for x in json.loads((ROOT / "patches/bluetooth-apk.json").read_text())["files"]
+        for x in json.loads(
+            (ROOT / "profiles/samsung-sm-s931z-dzif/bluetooth-apk.json").read_text()
+        )["files"]
         if x["path"] == REL
     )
     text = (ROOT / "build/bluetooth-apk" / REL).read_text()

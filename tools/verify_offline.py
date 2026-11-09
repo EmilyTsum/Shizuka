@@ -1,129 +1,125 @@
 # SPDX-License-Identifier: GPL-2.0-only
-import json
+"""Run host regressions; full mode also rebuilds the selected native backend."""
+
+import argparse
 import os
+import shlex
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-r = Path(__file__).resolve().parents[1]
-base = [
-    "clang++",
-    "-std=c++17",
-    "-g",
-    "-fsanitize=address,undefined",
-    "-DS25_R2=3",
-    "-DS25_RATE=96000",
-    "-DS25_MODE=4096",
-]
-jdk = Path(os.environ.get("JAVA_HOME", ""))
-jni = [
-    "-I" + str(jdk / "include"),
-    "-I" + str(jdk / "include" / ("darwin" if __import__("sys").platform == "darwin" else "linux")),
-]
-if not (jdk / "include/jni.h").is_file():
-    raise SystemExit("Set JAVA_HOME to a JDK with include/jni.h")
-(r / "build").mkdir(parents=True, exist_ok=True)
-(r / "evidence").mkdir(parents=True, exist_ok=True)
-results = []
-for name, files, flags in [
-    ("ll_switch", [], []),
-    ("aptx_ll", ["aptx_ll.cpp", "aptx_ll_backend.cpp"], []),
-    ("ll_native_protocol", ["aptx_ll.cpp", "aptx_ll_native.cpp"], []),
-    (
-        "ll_ui_registration",
-        ["ui.cpp", "protocol.cpp", "aptx_ll.cpp", "aptx_ll_native.cpp"],
-        ["-DS25_UI_TEST_BASE", *jni],
-    ),
-    ("protocol", ["protocol.cpp"], []),
-    ("peer_negotiation", ["protocol.cpp"], []),
-    (
-        "vendor",
-        [
-            "protocol.cpp",
-            "payload.cpp",
-            "layout.cpp",
-            "aptx_ll.cpp",
-            "aptx_ll_native.cpp",
-        ],
-        ["-DS25_MALLOC_GOT=0xea65e0"],
-    ),
-    (
-        "ui_callback",
-        ["ui.cpp", "protocol.cpp", "aptx_ll.cpp", "aptx_ll_native.cpp"],
-        jni,
-    ),
-    ("layout_stability", ["layout.cpp", "protocol.cpp"], []),
-]:
-    extra = [str(r / "tests/ll_native_tramp_stubs.cpp")] if "aptx_ll_native.cpp" in files else []
-    test = r / "tests" / f"{name}_test.cpp"
-    out = r / "build" / f"host-{name}-test"
-    cmd = (
-        base + flags + extra + [str(test)] + [str(r / "src" / f) for f in files] + ["-o", str(out)]
+from shizuka.artifacts import (
+    NATIVE_VALIDATION,
+    native_build_snapshot,
+    record_native_validation,
+    write_metadata,
+)
+from shizuka.backends import get_backend
+from shizuka.profiles import load_profile
+from shizuka.project import BUILD, ROOT, native_source, offline_sources_fingerprint
+from shizuka.validation import PYTHON_CASES, validate_evidence
+from verify_policies import verify_policies
+
+
+def verify_native(profile):
+    backend = get_backend(profile)
+    compiler = (
+        shlex.split(os.environ["CXX"])
+        if os.environ.get("CXX")
+        else [shutil.which("clang++") or shutil.which("g++") or "clang++"]
     )
-    subprocess.run(cmd, check=True)
-    res = subprocess.run([str(out)], check=True, capture_output=True, text=True)
-    print(name + ": " + res.stdout.strip())
-    results.append({"test": name, "passed": True, "output": res.stdout.strip()})
-# The controller request policy is pure Java; exercise async epochs without Android or HCI.
-policy_classes = r / "build/policy-host-tests"
-policy_classes.mkdir(parents=True, exist_ok=True)
-subprocess.run(
-    [
-        str(jdk / "bin/javac"),
-        "-d",
-        str(policy_classes),
-        str(r / "tools/ClassicQhsPolicy.java"),
-        str(r / "tests/ClassicQhsPolicyTest.java"),
-    ],
-    check=True,
-)
-policy_result = subprocess.run(
-    [str(jdk / "bin/java"), "-cp", str(policy_classes), "ClassicQhsPolicyTest"],
-    check=True,
-    capture_output=True,
-    text=True,
-)
-print(policy_result.stdout.strip())
-results.append(
-    {"test": "classic_qhs_policy", "passed": True, "output": policy_result.stdout.strip()}
-)
-subprocess.run(
-    [
-        str(jdk / "bin/javac"),
-        "-d",
-        str(policy_classes),
-        str(r / "tools/ControllerFeaturesSchema.java"),
-        str(r / "tests/ControllerFeaturesTest.java"),
-    ],
-    check=True,
-)
-features_result = subprocess.run(
-    [str(jdk / "bin/java"), "-cp", str(policy_classes), "ControllerFeaturesTest"],
-    check=True,
-    capture_output=True,
-    text=True,
-)
-print(features_result.stdout.strip())
-results.append(
-    {"test": "controller_features", "passed": True, "output": features_result.stdout.strip()}
-)
-nvm_result = subprocess.run(
-    [__import__("sys").executable, str(r / "tests/qhs_nvm_test.py")],
-    check=True,
-    capture_output=True,
-    text=True,
-)
-print(nvm_result.stdout.strip() + nvm_result.stderr.strip())
-results.append(
-    {"test": "qhs_nvm", "passed": True, "output": (nvm_result.stdout + nvm_result.stderr).strip()}
-)
-(r / "evidence/ll-offline-tests.json").write_text(
-    json.dumps(results, ensure_ascii=False, indent=2) + "\n"
-)
-env = dict(os.environ)
-if "--host-only" not in __import__("sys").argv:
-    subprocess.run([__import__("sys").executable, str(r / "tools/build.py")], env=env, check=True)
-    subprocess.run(
-        [__import__("sys").executable, str(r / "tests/dispatch_emulation_check.py")],
-        env=env,
-        check=True,
+    base = compiler + [
+        "-I" + str(ROOT / "src"),
+        "-std=c++17",
+        "-g",
+        "-fsanitize=address,undefined",
+        *backend.host_flags(),
+    ]
+    jdk = Path(os.environ.get("JAVA_HOME", ""))
+    jni_root = Path(os.environ.get("SHIZUKA_JNI_INCLUDE", str(jdk / "include")))
+    if getattr(backend, "HOST_REQUIRES_JNI", False) and not (jni_root / "jni.h").is_file():
+        raise ValueError("Set JAVA_HOME to a JDK, or SHIZUKA_JNI_INCLUDE to JNI headers")
+    jni = [
+        "-I" + str(jni_root),
+        "-I" + str(jni_root / ("darwin" if sys.platform == "darwin" else "linux")),
+    ]
+    results = []
+    for name, files, flags in backend.host_cases(jni):
+        extra = (
+            [str(ROOT / "tests/ll_native_tramp_stubs.cpp")] if "aptx_ll_native.cpp" in files else []
+        )
+        test = ROOT / "tests" / f"{name}_test.cpp"
+        output = BUILD / f"host-{name}-test"
+        subprocess.run(
+            base
+            + flags
+            + extra
+            + [str(test)]
+            + [str(native_source(profile.driver, name)) for name in files]
+            + ["-o", str(output)],
+            check=True,
+        )
+        result = subprocess.check_output([str(output)], text=True).strip()
+        print(name + ": " + result)
+        results.append(
+            {
+                "test": name,
+                "passed": True,
+                "output": result,
+                "sanitizers": ["address", "undefined"],
+                "leak_detection_disabled": "detect_leaks=0" in os.environ.get("ASAN_OPTIONS", ""),
+            }
+        )
+    return results
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--host-only", action="store_true", help="Do not rebuild proprietary native inputs"
     )
+    parser.add_argument("--android-jar", help="Also compile Android helpers against this API jar")
+    args = parser.parse_args()
+    profile = load_profile()
+    BUILD.mkdir(exist_ok=True)
+    evidence = ROOT / "evidence"
+    host_evidence = evidence / "ll-offline-tests.json"
+    host_evidence.unlink(missing_ok=True)
+    if not args.host_only:
+        (BUILD / NATIVE_VALIDATION).unlink(missing_ok=True)
+    fingerprint = offline_sources_fingerprint()
+    results = verify_native(profile)
+    results.extend(verify_policies(args.android_jar))
+    for name, filename in PYTHON_CASES:
+        run = subprocess.run(
+            [sys.executable, str(ROOT / "tests" / filename)],
+            capture_output=True,
+            text=True,
+        )
+        output = (run.stdout + run.stderr).strip()
+        print(output, flush=True)
+        run.check_returncode()
+        results.append({"test": name, "passed": True, "output": output})
+    if fingerprint != offline_sources_fingerprint():
+        raise ValueError("Sources changed during verification; rerun the checks")
+    for result in results:
+        result.update(
+            profile_id=profile.id,
+            profile_fingerprint=profile.fingerprint,
+            sources_fingerprint=fingerprint,
+        )
+    validate_evidence(results, profile)
+    if not args.host_only:
+        subprocess.run([sys.executable, str(ROOT / "tools/build.py")], check=True)
+        builds = native_build_snapshot(profile)
+        get_backend(profile).verify_dispatch(profile)
+        if fingerprint != offline_sources_fingerprint():
+            raise ValueError("Sources changed during integration; rerun the checks")
+        record_native_validation(profile, builds)
+    evidence.mkdir(exist_ok=True)
+    write_metadata(host_evidence, results)
+
+
+if __name__ == "__main__":
+    main()
