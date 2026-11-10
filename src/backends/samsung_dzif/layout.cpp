@@ -25,15 +25,24 @@ bool adaptive_valid(const uint8_t *cfg) {
         return false;
     if (a->sample_rate == 44100 && (a->stream.begin[0] != 1 || !(a->stream.begin[1] & 0x80)))
         return false;
-    bool balanced = true, stable = true;
+    bool balanced = true, stable = true, floored = true;
     for (unsigned i = 0; i < 6; i++) {
         unsigned normal = i % 2 ? 50 : 20;
         if (a->buffering[i] != normal)
             balanced = false;
         if (a->buffering[i] != (i == 2 ? 60 : i == 3 ? 100 : normal))
             stable = false;
+        // Margin trial (experiment): minHQ buffering[2] = 100 -> DSP INIT
+        // floors TTP at 110 ms instead of 70 ms for the 44.1 HQ stability
+        // profile. buffering[2] must stay <= 127: Samsung's offload path
+        // sign-extends the byte and larger values silently fall back to the
+        // stock default. This only raises the INIT floor (clamped by the
+        // DSP's internal HQ maximum, default 200 ms); it does not prove a
+        // larger receiver buffer. See docs/TTP-TRIAL.md.
+        if (a->buffering[i] != (i == 2 ? 100 : i == 3 ? 100 : normal))
+            floored = false;
     }
-    return balanced || (stable && a->sample_rate == 44100 && a->mode == 4096 &&
+    return balanced || ((stable || floored) && a->sample_rate == 44100 && a->mode == 4096 &&
                         a->stream.begin[0] == 1 && (a->stream.begin[1] & 0x80));
 }
 } // namespace s25
