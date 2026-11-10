@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
@@ -50,12 +51,42 @@ static void quoted(const char *text) {
     }
     putchar('"');
 }
-typedef struct { char text[MAX_MESSAGE]; size_t used; int skip; unsigned records, discarded; } Decoder;
+static int relevant(const char *text) {
+    // Filter before JSON encoding/IPC. Per-process and owned GPR/module-event
+    // traffic can otherwise exhaust the Java artifact budget within seconds.
+    static const char *const fields[] = {
+        "Packet- #", "HQ State- ", "Param INIT:", "ENC INIT:", "ENC INIT DONE",
+        "Sample rate - ", "sample rate is ", "linkState.sampleRate is ",
+        "quality level received is ", "CQDDR Status preferredQHS is ",
+        "RSSI value after applying a smoothing filter is", "the raw RSSI is",
+        "Number of BT links is", "Wi-fi 2.4GHz is", "BLE scan is", "Page scan is",
+        "QHS support is", "16-bit audio flag is", "System mode is", "Latency state is",
+        "Next State is", "hQLatTarget0", "ttpadj microseconds", "Shizuka TTP",
+        "ENABLE_", "SIMULATE_FORCE_LOSSLESS", "br_level =",
+        "aptXEncode_SetBitRate() set to desired value",
+        "SPF APTX_ADAPTIVE3_ENC: Packet type",
+        "CAPI V2 APTX ADAPTIVE ENC:PROCESS()- dispatching "
+    };
+    if (strstr(text, "aptx_adaptive_enc_module.so.1") &&
+        (strstr(text, "SigVerify") || strstr(text, "dlopen_ex failed"))) return 1;
+    // Match the encoder family before retaining otherwise generic state words.
+    if (!(strstr(text, "APTX") || strstr(text, "aptx") || strstr(text, "hQLatTarget0") ||
+          strstr(text, "Shizuka TTP") || strstr(text, "IMCL_PARAM_ID_BT_SIDEBAND_ENCODER_FEEDBACK") ||
+          strstr(text, "IMCL_PARAM_ID_BT_BIT_RATE_LEVEL_ENCODER_FEEDBACK") ||
+          strstr(text, "COP_SIDEBAND_ID_ENCODER_FEEDBACK"))) return 0;
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i)
+        if (strstr(text, fields[i])) return 1;
+    return 0;
+}
+typedef struct { char text[MAX_MESSAGE]; size_t used; int skip, filter; unsigned records, discarded, filtered; } Decoder;
 static void consume(Decoder *decoder, unsigned char byte, double time) {
     if (!byte) {
         if (decoder->skip) decoder->skip = 0;
         else if (decoder->used) {
             decoder->text[decoder->used] = 0;
+            if (decoder->filter && !relevant(decoder->text)) {
+                decoder->filtered++; decoder->used = 0; return;
+            }
             printf("{\"type\":\"dsp_log\",\"monotonic_s\":%.6f,\"text\":", time);
             quoted(decoder->text); puts("}"); decoder->records++;
         }
@@ -108,6 +139,22 @@ static int recover(void) {
     DIR *directory = opendir("/data/vendor/audio_dsp");
     if (!directory) return errno == ENOENT ? 0 : 76;
     int result = recover_directory(directory, boot, 1013);
+    closedir(directory); return result;
+}
+static int prepare_capture_directory(DIR *directory, const char *boot, uid_t expected_owner) {
+    int result = recover_directory(directory, boot, expected_owner);
+    if (result) return result;
+    // Recovery can preserve a live publisher or an unrelated FARF file. Neither
+    // permits a new reader. In particular, recovery success is not ownership.
+    struct stat current;
+    if (!fstatat(dirfd(directory), WATCHED, &current, AT_SYMLINK_NOFOLLOW)) return 65;
+    return errno == ENOENT ? 0 : 76;
+}
+static int prepare_capture(void) {
+    char boot[64]; if (boot_id(boot, sizeof(boot))) return 76;
+    DIR *directory = opendir("/data/vendor/audio_dsp");
+    if (!directory) return errno == ENOENT ? 0 : 76;
+    int result = prepare_capture_directory(directory, boot, 1013);
     closedir(directory); return result;
 }
 static int watchdog(int directory, const char *stage, const struct stat *identity, int seconds);
@@ -207,7 +254,14 @@ int main(int argc, char **argv) {
     char *end; errno = 0; long seconds = strtol(argv[1], &end, 10);
     if (errno || *end || seconds < 5 || seconds > 120) return 64;
     signal(SIGTERM, stop_capture); signal(SIGINT, stop_capture);
+    int supervisor = (int)getppid();
+    if (prctl(PR_SET_PDEATHSIG, SIGTERM) || getppid() != supervisor) return 66;
     setvbuf(stdout, NULL, _IOLBF, 0);
+    // A whole Android process group can die together with its watchdog. On the
+    // next foreground entry, clean only the exact dead owner's staged inode;
+    // never rely on a universal five-second SIGKILL cleanup guarantee.
+    int prepared = prepare_capture();
+    if (prepared) { fputs("existing FARF publisher/configuration could not be safely recovered\n", stderr); return prepared; }
     int pid = daemon_pid(); if (pid < 2 || !farf_absent()) { fputs("ambiguous daemon or existing FARF configuration\n", stderr); return 65; }
     int process = (int)syscall(SYS_pidfd_open, pid, 0);
     if (process < 0) { perror("daemon pidfd"); return 66; }
@@ -272,7 +326,7 @@ int main(int argc, char **argv) {
     mapping = mmap(NULL, RING_SIZE, PROT_READ, MAP_SHARED, fd, 0);
     if (mapping == MAP_FAILED || !(copy = malloc(CAPACITY))) { perror("read-only ring mapping/allocation"); goto cleanup; }
     printf("{\"type\":\"capture\",\"daemon_pid\":%d,\"clock\":\"CLOCK_MONOTONIC\",\"ring_overruns\":\"unobservable\"}\n", pid);
-    Decoder decoder = {.skip = 1}; uint32_t last = 0; int first = 1; unsigned unstable = 0;
+    Decoder decoder = {.skip = 1, .filter = 1}; uint32_t last = 0; int first = 1; unsigned unstable = 0;
     result = 0;
     while (!stopped && monotonic() - start < seconds) {
         if (poll(&alive, 1, 0) != 0) { result = 72; break; }
@@ -288,8 +342,8 @@ int main(int argc, char **argv) {
         else while (last != pos) { consume(&decoder, copy[last], monotonic()); last = (last + 1) % CAPACITY; }
         pause_poll();
     }
-    printf("{\"type\":\"end\",\"records\":%u,\"discarded_messages\":%u,\"unstable_snapshots\":%u,\"result\":%d}\n",
-        decoder.records, decoder.discarded, unstable, result);
+    printf("{\"type\":\"end\",\"records\":%u,\"discarded_messages\":%u,\"filtered_messages\":%u,\"unstable_snapshots\":%u,\"result\":%d}\n",
+        decoder.records, decoder.discarded, decoder.filtered, unstable, result);
 cleanup:
     if (mapping != MAP_FAILED) munmap(mapping, RING_SIZE);
     free(copy); if (fd >= 0) close(fd);

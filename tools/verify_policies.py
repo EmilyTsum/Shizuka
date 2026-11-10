@@ -37,6 +37,7 @@ def verify_policies(android_jar=None):
             "CodecTuning",
             "DspLogDecoder",
             "DiagnosticStore",
+            "ObservationLease",
         ]
     ]
     subprocess.run(

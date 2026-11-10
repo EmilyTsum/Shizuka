@@ -74,8 +74,72 @@ profile_verify_controller_firmware() {
 }
 profile_hal_ready() {
  [ -n "$1" ] && [ "$1" != "$2" ] || return 1
- grep -Fq "${HAL##*/}" "/proc/$1/maps" 2>/dev/null || return 1
- "$BB" timeout 2 service call "$AUDIO_HAL_FACTORY" 1599098439 2>/dev/null | grep -q 'Result: Parcel'
+ case "$1" in *[!0-9]*|0) return 1;;esac
+ ready_start=$(process_start "$1") || return 1
+ [ "$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")" = "$1" ] || return 1
+ "$BB" awk -v stock="$HAL" -v owned="$MODDIR/payload/$HAL_PAYLOAD" \
+  '$NF==stock || $NF==owned {found=1} END {exit !found}' "/proc/$1/maps" 2>/dev/null || return 1
+ for service_name in android.hardware.audio.core.IModule/default android.hardware.audio.effect.IFactory/default "$AUDIO_HAL_FACTORY";do
+  service_pid=$("$BB" timeout 1 dumpsys --pid "$service_name" 2>/dev/null) || return 1
+  [ "$service_pid" = "$1" ] || return 1
+  "$BB" timeout 1 service call "$service_name" 1599098439 2>/dev/null | grep -q 'Result: Parcel' || return 1
+ done
+ [ "$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")" = "$1" ] && process_matches "$1" "$ready_start"
+}
+
+# Normal ADSP loader entry reviewed in the installed module. No crash endpoint,
+# firmware mutation, thermal restart or generic remoteproc selection is allowed.
+profile_latency_recovery_preflight() {
+ [ "$(getprop ro.build.version.incremental)" = S931ZSCU1DZIF ] || return 1
+ [ "$(cat /sys/class/remoteproc/remoteproc1/name)" = 3000000.remoteproc-adsp ] || return 1
+ [ -f /sys/kernel/boot_adsp/ssr ] && [ ! -L /sys/kernel/boot_adsp/ssr ] || return 1
+ for recovery_pair in \
+  /vendor_dlkm/lib/modules/adsp_loader_dlkm.ko:3d9708cbb7b5e5b64bbb0f4acea91a6ba4db9630d9ac8503f7dda2a546d8ec1c \
+  /vendor/dsp/adsp/aptx_adaptive_enc_module.so.1:05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3 \
+  /vendor/lib64/libar-gsl.so:4d7219f3d1e167c29548aebac62d827c17ef88e5f46be4831d9dd1c003caf6bc;do
+  recovery_path=${recovery_pair%:*};recovery_expected=${recovery_pair##*:}
+  recovery_actual=$(nsrun 1 "$BB" sha256sum "$recovery_path") || return 1
+  [ "${recovery_actual%% *}" = "$recovery_expected" ] || return 1
+ done
+}
+profile_latency_hal_identity() {
+ recovery_pid=$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")
+ if [ -z "$recovery_pid" ] && [ "$(getprop "init.svc.$AUDIO_HAL_SERVICE")" = stopped ];then
+  printf '0 0\n';return 0
+ fi
+ recovery_ticks=$(process_start "$recovery_pid") || return 1
+ printf '%s %s\n' "$recovery_pid" "$recovery_ticks"
+}
+profile_latency_stop_hal() {
+ recovery_pid=$1;recovery_ticks=$2
+ if [ "$recovery_pid" = 0 ];then
+  [ -z "$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")" ] && \
+   [ "$(getprop "init.svc.$AUDIO_HAL_SERVICE")" = stopped ] || return 1
+ else
+  [ "$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")" = "$recovery_pid" ] && \
+   process_matches "$recovery_pid" "$recovery_ticks" || return 1
+ fi
+ setprop ctl.stop "$AUDIO_HAL_SERVICE" || return 1
+ recovery_wait=0
+ while [ "$recovery_wait" -lt 50 ];do
+  if [ "$(getprop "init.svc.$AUDIO_HAL_SERVICE")" = stopped ] && \
+   { [ "$recovery_pid" = 0 ] || ! process_matches "$recovery_pid" "$recovery_ticks"; };then return 0;fi
+  sleep 0.1;recovery_wait=$((recovery_wait+1))
+ done
+ return 1
+}
+profile_latency_restart_dsp() {
+ profile_latency_recovery_preflight || return 1
+ printf '1' > /sys/kernel/boot_adsp/ssr
+}
+profile_latency_dsp_state() { cat /sys/class/remoteproc/remoteproc1/state; }
+profile_latency_normal_ready() {
+ normal_start=$(process_start "$1") || return 1
+ [ "$(profile_latency_dsp_state)" = running ] || return 1
+ profile_hal_ready "$1" "$2" || return 1
+ "$BB" awk '$NF=="/vendor/lib64/libar-gsl.so" {found=1} END {exit !found}' "/proc/$1/maps" 2>/dev/null || return 1
+ recovery_gsl=$(nsrun "$1" "$BB" sha256sum /vendor/lib64/libar-gsl.so) || return 1
+ [ "${recovery_gsl%% *}" = 4d7219f3d1e167c29548aebac62d827c17ef88e5f46be4831d9dd1c003caf6bc ] && process_matches "$1" "$normal_start"
 }
 
 # FastRPC paths/log formats and approved DSP images are this backend's contract.
@@ -89,6 +153,10 @@ profile_diagnostics_preflight() {
 
 # Only an explicitly installed, owned trial creates this marker. Boot never applies a DSP image.
 profile_recover_experiments() (
+ if [ -e "$STATE/latency-runtime.active" ] || [ -L "$STATE/latency-runtime.active" ] || \
+  [ -e "$STATE/latency-remote-uncertain" ] || [ -L "$STATE/latency-remote-uncertain" ];then
+  "$BB" sh "$MODDIR/latency-runtime.sh" recover-dsp || return 1
+ fi
  [ -e "$STATE/dsp-trial.active" ] || return 0
  [ ! -L "$STATE/dsp-trial.active" ] && [ "$("$BB" stat -c '%u' "$STATE/dsp-trial.active")" = 0 ] || return 1
  dsp_target=/vendor/dsp/adsp/aptx_adaptive_enc_module.so.1
@@ -109,6 +177,12 @@ profile_recover_experiments() (
  done
  return 1
 )
+profile_finish_runtime_recovery() {
+ if [ -e "$STATE/latency-runtime.active" ] || [ -L "$STATE/latency-runtime.active" ] || \
+  [ -e "$STATE/latency-remote-uncertain" ] || [ -L "$STATE/latency-remote-uncertain" ];then
+  "$BB" sh "$MODDIR/latency-runtime.sh" recovered "$1"
+ fi
+}
 
 profile_dsp_image_allowed() {
   case "$1" in
@@ -120,6 +194,7 @@ profile_dsp_image_allowed() {
 }
 
 profile_activate_experiments() (
+ if [ -e "$STATE/latency-runtime.request" ];then "$BB" sh "$MODDIR/latency-runtime.sh" mount || return 1;fi
  request="$STATE/dsp-trial.request"
  [ -e "$request" ] || return 0
  [ -f "$request" ] && [ ! -L "$request" ] && [ "$("$BB" stat -c '%u:%a' "$request")" = 0:600 ] || return 1
@@ -135,8 +210,44 @@ profile_activate_experiments() (
  return 1
 )
 
+profile_start_runtime() {
+ [ -e "$STATE/latency-runtime.active" ] || return 0
+ "$BB" sh "$MODDIR/latency-runtime.sh" start
+}
+profile_stop_runtime() {
+ if [ -e "$STATE/latency-runtime.active" ] || [ -e "$STATE/latency-provider.pid" ];then
+  "$BB" sh "$MODDIR/latency-runtime.sh" stop
+ fi
+ return 0
+}
+profile_verify_runtime() {
+ [ -e "$STATE/latency-runtime.active" ] || return 0
+ "$BB" sh "$MODDIR/latency-runtime.sh" verify "$1"
+}
+
 profile_tuning_availability() {
+ if [ -e "$STATE/latency-runtime.active" ] || [ -L "$STATE/latency-runtime.active" ];then
+  recovery_boot=''
+  IFS=' ' read -r recovery_boot recovery_rest < "$STATE/latency-runtime.active" || recovery_boot=''
+  if [ "$recovery_boot" != "$(cat /proc/sys/kernel/random/boot_id)" ];then
+   "$BB" sh "$MODDIR/latency-runtime.sh" recovery-status
+   return $?
+  fi
+ fi
+ if [ -e "$STATE/latency-remote-uncertain" ] || [ -L "$STATE/latency-remote-uncertain" ];then
+  "$BB" sh "$MODDIR/latency-runtime.sh" recovery-status
+  return $?
+ fi
+ if [ -x "$MODDIR/latency-provider" ] && [ -f "$MODDIR/latency-provider.sha256" ] &&
+    [ ! -L "$MODDIR/latency-provider" ] && [ ! -L "$MODDIR/latency-provider.sha256" ];then
+  expected=$(cat "$MODDIR/latency-provider.sha256")
+  actual=$("$BB" sha256sum "$MODDIR/latency-provider");actual=${actual%% *}
+  if [ "$actual" = "$expected" ];then
+   "$MODDIR/latency-provider" --status --module-dir "$MODDIR"
+   return $?
+  fi
+ fi
  cat <<'JSON'
-{"schema":1,"runtime_apply_supported":false,"status":"blocked_signature_verification","reason":"This firmware rejects modified DSP encoder images. Additional TTP values can be saved and planned, but cannot currently be applied.","scope":"additional_ttp","stock_dsp_sha256":"05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3","codec_selection_available":true}
+{"schema":1,"available":false,"applied":false,"runtime_apply_supported":false,"status":"runtime_not_packaged","reason":"The optional live transport provider is missing or failed artifact verification. Saved additional delay remains pending. Signed DSP firmware is unchanged.","scope":"additional_ttp","stock_dsp_sha256":"05ec096c94ca717fd390c6bd8a37dd5f695f83c3f26e7e9f132c81b4f9f8ecc3","codec_selection_available":true}
 JSON
 }

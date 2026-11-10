@@ -7,7 +7,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import org.json.*;
 
-/** Foreground opt-in capture, structured live snapshots and explicit private export. */
+/** Foreground leased observation, bounded captures and explicit private export. */
 public final class BtDiagnostics {
     private static final Path DATA = Paths.get("/data/adb/shizuka");
     private static Object androidSelection = Collections.emptyMap();
@@ -53,6 +53,20 @@ public final class BtDiagnostics {
         return ControlJson.object("boot_id", small(Paths.get("/proc/sys/kernel/random/boot_id")),
             "bluetooth_pid", bt, "bluetooth_start", btStart, "hal_pid", hal, "hal_start", halStart);
     }
+    private static boolean observationAuthority(Path module, Map<String, Object> bound) throws IOException {
+        if (!Files.isRegularFile(module.resolve("module.prop"), LinkOption.NOFOLLOW_LINKS) ||
+            Files.exists(module.resolve("disable"), LinkOption.NOFOLLOW_LINKS) ||
+            Files.exists(module.resolve("remove"), LinkOption.NOFOLLOW_LINKS) || !bound.equals(identity(module))) return false;
+        String status = small(Paths.get("/proc/self/status"));
+        boolean root = false, capability = false;
+        for (String line : status.split("\\n")) {
+            if (line.startsWith("Uid:")) root = line.substring(4).trim().matches("0\\s+0\\s+0\\s+0");
+            if (line.startsWith("CapEff:")) try {
+                capability = (Long.parseUnsignedLong(line.substring(7).trim(), 16) & (1L << 21)) != 0;
+            } catch (NumberFormatException invalid) { return false; }
+        }
+        return root && capability;
+    }
     private static Map<String, Object> snapshot(DspLogDecoder decoder, Map<String, Object> identity, String id, boolean running, String reason) {
         if (running && now() - selectionTime >= 1) {
             try {
@@ -71,13 +85,14 @@ public final class BtDiagnostics {
         }
         Map<String, Object> out = decoder.snapshot(now()); out.putAll(identity);
         out.put("capture_id", id); out.put("running", running); out.put("reason", reason);
+        out.put("collected_at_ms", System.currentTimeMillis());
         out.put("binding", "module process identities and DSP rate; not a radio or receiver acknowledgement");
         out.put("android_selection", androidSelection);
         out.put("android_selection_age_seconds", selectionTime < 0 ? null : now() - selectionTime);
         if (!running) out.put("available", false);
         return out;
     }
-    private static void captureWithProfiles(Path module, DiagnosticStore store, int seconds) throws Exception {
+    private static void captureWithProfiles(Path module, DiagnosticStore store, int seconds, ObservationLease lease) throws Exception {
         BluetoothRuntime runtime = BluetoothRuntime.connect();
         BtStatus.context = runtime.context; BtStatus.adapter = runtime.adapter; BtStatus.moduleRoot = module;
         android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -86,8 +101,9 @@ public final class BtDiagnostics {
             (id, operation, error) -> BtStatus.error("profile " + id + " " + operation, error));
         BtStatus.profiles.start(2500, () -> new Thread(() -> {
             int status = 0;
-            try { capture(module, store, seconds); }
+            try { capture(module, store, seconds, lease); }
             catch (Exception error) { report(error); status = 1; }
+            finally { if (lease != null) try { lease.close(); } catch (IOException error) { report(error); } }
             final int result = status;
             handler.post(() -> { BtStatus.profiles.close(); System.exit(result); });
         }, "Shizuka-diagnostics").start());
@@ -96,8 +112,12 @@ public final class BtDiagnostics {
     private static void report(Exception error) {
         System.err.println(ControlJson.encode(ControlJson.object("error", error.getClass().getSimpleName(), "reason", String.valueOf(error.getMessage()))));
     }
-    private static void capture(Path module, DiagnosticStore store, int seconds) throws Exception {
+    private static void capture(Path module, DiagnosticStore store, int seconds, ObservationLease lease) throws Exception {
         if (seconds < 5 || seconds > 120) throw new IllegalArgumentException("Capture duration must be 5..120 seconds");
+        if (lease != null && !lease.alive()) {
+            System.out.println(ControlJson.encode(ControlJson.object("running", false, "reason", "Foreground observation ended")));
+            return;
+        }
         Path lock = store.data.resolve(".diagnostics.lock");
         try { store.create(store.data, ".diagnostics.lock"); } catch (FileAlreadyExistsException ignored) {}
         store.check(lock, false);
@@ -105,32 +125,54 @@ public final class BtDiagnostics {
              FileLock held = channel.tryLock()) {
             if (held == null) throw new IOException("Another diagnostic capture is running");
             Map<String, Object> bound = identity(module);
+            if (lease != null && !observationAuthority(module, bound))
+                throw new IOException("Foreground observation authority is unavailable");
             String id = "session-" + UUID.randomUUID();
-            Path session = store.sessions.resolve(id); store.directory(session);
-            Path raw = store.create(session, "raw.jsonl"), events = store.create(session, "events.jsonl");
-            Path errors = store.create(session, "native.stderr");
+            boolean retain = lease == null;
+            Path session = retain ? store.sessions.resolve(id) : null;
+            if (retain) store.directory(session);
+            Path raw = retain ? store.create(session, "raw.jsonl") : null;
+            Path events = retain ? store.create(session, "events.jsonl") : null;
+            Path errors = retain ? store.create(session, "native.stderr") : null;
             DspLogDecoder decoder = new DspLogDecoder();
             store.atomic(store.data, "telemetry.json", snapshot(decoder, bound, id, true, "Waiting for encoder records"));
             Process process;
             try {
-                process = new ProcessBuilder(module.resolve("dsp-capture").toString(), Integer.toString(seconds))
-                    .redirectError(errors.toFile()).start();
+                ProcessBuilder builder = new ProcessBuilder(module.resolve("dsp-capture").toString(), Integer.toString(seconds));
+                if (retain) builder.redirectError(errors.toFile());
+                else builder.redirectError(ProcessBuilder.Redirect.INHERIT);
+                process = builder.start();
             } catch (IOException error) {
                 Map<String, Object> ended = snapshot(decoder, bound, id, false, "Diagnostic reader could not start");
-                store.atomic(store.data, "telemetry.json", ended); store.atomic(session, "summary.json", ended);
+                store.atomic(store.data, "telemetry.json", ended);
+                if (retain) store.atomic(session, "summary.json", ended);
                 throw error;
             }
             ScheduledExecutorService deadline = Executors.newSingleThreadScheduledExecutor();
             deadline.schedule(process::destroyForcibly, seconds + 10, TimeUnit.SECONDS);
-            String failure = null; int exit = -1; long bytes = 0; double published = -1;
+            java.util.concurrent.atomic.AtomicBoolean leaseEnded = new java.util.concurrent.atomic.AtomicBoolean();
+            if (lease != null) deadline.scheduleAtFixedRate(() -> {
+                boolean alive;
+                try { alive = lease.alive() && observationAuthority(module, bound); }
+                catch (IOException error) { alive = false; }
+                if (!alive && leaseEnded.compareAndSet(false, true)) {
+                    process.destroy();
+                    try { deadline.schedule(() -> { if (process.isAlive()) process.destroyForcibly(); }, 3, TimeUnit.SECONDS); }
+                    catch (RejectedExecutionException ended) { /* Capture has already unwound. */ }
+                }
+            }, 0, 250, TimeUnit.MILLISECONDS);
+            String failure = null; int exit = -1; long bytes = 0, retained = 0;
+            double published = -1, historyTime = -1;
             try (BufferedReader input = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-                 BufferedWriter rawOut = Files.newBufferedWriter(raw, StandardCharsets.UTF_8);
-                 BufferedWriter eventOut = Files.newBufferedWriter(events, StandardCharsets.UTF_8)) {
+                 BufferedWriter rawOut = retain ? Files.newBufferedWriter(raw, StandardCharsets.UTF_8) : null;
+                 BufferedWriter eventOut = retain ? Files.newBufferedWriter(events, StandardCharsets.UTF_8) : null) {
                 String line;
                 while ((line = input.readLine()) != null) {
                     bytes += line.length() + 1;
-                    if (line.length() > 65536 || bytes > 16 * 1024 * 1024) throw new IOException("Capture limit reached");
-                    rawOut.write(line); rawOut.newLine();
+                    if (line.length() > 65536) throw new IOException("Diagnostic record exceeds limit");
+                    if (retain && retained + line.length() + 1 <= 16 * 1024 * 1024) {
+                        rawOut.write(line); rawOut.newLine(); retained += line.length() + 1;
+                    }
                     JSONObject record = new JSONObject(line);
                     if ("dsp_log".equals(record.optString("type")))
                         decoder.accept(record.getDouble("monotonic_s"), record.getString("text"));
@@ -138,22 +180,40 @@ public final class BtDiagnostics {
                         if (!bound.equals(identity(module))) throw new IOException("Bluetooth/audio process generation changed");
                         Map<String, Object> value = snapshot(decoder, bound, id, true, "Encoder observation; receiver transmission unverified");
                         store.atomic(store.data, "telemetry.json", value);
-                        String encoded = ControlJson.encode(value); eventOut.write(encoded); eventOut.newLine(); eventOut.flush(); rawOut.flush();
-                        System.out.println(encoded); published = now();
+                        Map<?, ?> fields = (Map<?, ?>)value.get("fields");
+                        double latest = -1;
+                        for (String key : new String[] {"encoder_state", "quality_level"}) {
+                            Object item = fields.get(key);
+                            if (item instanceof Map) {
+                                Object time = ((Map<?, ?>)item).get("monotonic_s");
+                                if (time instanceof Number) latest = Math.max(latest, ((Number)time).doubleValue());
+                            }
+                        }
+                        if (latest > historyTime) {
+                            store.atomic(store.data, "encoder-history.json", value); historyTime = latest;
+                        }
+                        if (retain) {
+                            String encoded = ControlJson.encode(value); eventOut.write(encoded); eventOut.newLine(); eventOut.flush(); rawOut.flush();
+                            System.out.println(encoded);
+                        }
+                        published = now();
                     }
                 }
                 exit = process.waitFor();
-                if (exit != 0) failure = "Native capture exited " + exit + "; inspect native.stderr";
+                if (exit != 0 && !leaseEnded.get()) failure = "Native capture exited " + exit + (retain ? "; inspect native.stderr" : "");
             } catch (Exception error) {
-                failure = error.getClass().getSimpleName() + ": " + error.getMessage();
+                if (!leaseEnded.get()) failure = error.getClass().getSimpleName() + ": " + error.getMessage();
             } finally {
                 process.destroy();
                 if (!process.waitFor(3, TimeUnit.SECONDS)) process.destroyForcibly();
                 deadline.shutdownNow();
-                Map<String, Object> ended = snapshot(decoder, bound, id, false, failure == null ? "Capture ended" : failure);
-                ended.put("native_exit", exit); ended.put("raw_bytes", bytes);
-                ended.put("artifacts", Arrays.asList("raw.jsonl", "events.jsonl", "native.stderr"));
-                store.atomic(store.data, "telemetry.json", ended); store.atomic(session, "summary.json", ended);
+                Map<String, Object> ended = snapshot(decoder, bound, id, false, failure != null ? failure :
+                    leaseEnded.get() ? "Foreground observation ended" : "Capture ended");
+                ended.put("native_exit", exit); ended.put("raw_bytes", retained); ended.put("input_bytes", bytes);
+                ended.put("raw_truncated", retain && bytes > retained); ended.put("observation_only", !retain);
+                ended.put("artifacts", retain ? Arrays.asList("raw.jsonl", "events.jsonl", "native.stderr") : Collections.emptyList());
+                store.atomic(store.data, "telemetry.json", ended);
+                if (retain) store.atomic(session, "summary.json", ended);
                 System.out.println(ControlJson.encode(ended));
             }
             if (failure != null) throw new IOException(failure);
@@ -163,10 +223,18 @@ public final class BtDiagnostics {
         try {
             if (args.length < 2) throw new IllegalArgumentException("module root and action required");
             if ("help".equals(args[1])) {
-                System.out.println("diagnostics.sh capture SECONDS|list|export SESSION; no boot capture, properties or codec writes"); return;
+                System.out.println("diagnostics.sh capture SECONDS|observe TOKEN|renew TOKEN|stop TOKEN|list|export SESSION; foreground observation only, no boot capture or codec writes"); return;
             }
             DiagnosticStore store = new DiagnosticStore(DATA, 0);
-            if ("capture".equals(args[1]) && args.length == 3) captureWithProfiles(Paths.get(args[0]), store, Integer.parseInt(args[2]));
+            if ("capture".equals(args[1]) && args.length == 3) captureWithProfiles(Paths.get(args[0]), store, Integer.parseInt(args[2]), null);
+            else if ("observe".equals(args[1]) && args.length == 3) {
+                ObservationLease lease = ObservationLease.begin(store, args[2]);
+                try { captureWithProfiles(Paths.get(args[0]), store, 120, lease); }
+                catch (Exception error) { lease.close(); throw error; }
+            } else if ("renew".equals(args[1]) && args.length == 3)
+                System.out.println(ControlJson.encode(ControlJson.object("running", ObservationLease.renew(store, args[2]))));
+            else if ("stop".equals(args[1]) && args.length == 3)
+                System.out.println(ControlJson.encode(ControlJson.object("stopped", ObservationLease.stop(store, args[2]))));
             else if ("export".equals(args[1]) && args.length == 3)
                 System.out.println(ControlJson.encode(ControlJson.object("schema", 1, "archive", store.export(args[2]).toString())));
             else if ("list".equals(args[1]) && args.length == 2) {

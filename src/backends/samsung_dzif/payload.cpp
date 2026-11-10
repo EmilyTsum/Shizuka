@@ -4,6 +4,7 @@
 #include "settings.h"
 #include "coexist.h"
 #include "aptx_ll_native.h"
+#include "latency_context.h"
 extern "C" __attribute__((visibility("hidden"))) void s25_anchor();
 extern "C" uint8_t tramp_prs_cfg(void *, uint8_t *, uint16_t, uint8_t *, uint8_t);
 extern "C" void tramp_bld_cfg(uint8_t **, void *);
@@ -11,6 +12,7 @@ extern "C" __attribute__((visibility("hidden"))) bool tramp_to_hal(uint8_t *, vo
 extern "C" bool tramp_enabled(const uint8_t *);
 extern "C" __attribute__((visibility("hidden"))) bool tramp_specific(void *, uint8_t *);
 extern "C" bool tramp_validate(const uint8_t *, const uint8_t *);
+extern "C" void tramp_report_config(void *, const uint8_t *);
 struct VscComplete {
     uint16_t opcode;
     uint16_t length;
@@ -249,21 +251,25 @@ extern "C" bool s25_to_hal(uint8_t *out, void *codec) {
     destroy(view);
     if (!ok || *(uint32_t *)out != 4)
         return false;
+    // Capture one coherent private descriptor before constructing the wire-independent tag.
+    uint8_t proxy[20];
+    memcpy(proxy, (uint8_t *)codec + 0x1a0, sizeof proxy);
+    const uint8_t flags = proxy[13];
     uint8_t selected[43];
-    if (!s25::proxy_selection((uint8_t *)codec + 0x1a0, selected))
+    if (!s25::proxy_selection(proxy, selected))
         return false;
     {
         Lock guard;
         memcpy(state.selected, selected, 43);
         state.selected_seen = 1;
-        state.encoder_mode = s25::hal_mode(s25::flags_mode(((uint8_t *)codec)[0x1ad]));
+        state.encoder_mode = s25::hal_mode(s25::flags_mode(flags));
     }
     // The original converter left an aptX POD variant (tag 3); no owning vector is discarded.
     if (*(uint32_t *)(out + 0x58) != 3)
         return false;
     auto new_bytes = reinterpret_cast<void *(*)(size_t)>(
         *reinterpret_cast<uintptr_t *>(base() + S25_MALLOC_GOT));
-    auto *stream = (uint8_t *)new_bytes(11);
+    auto *stream = (uint8_t *)new_bytes(S25_LATENCY_TAGGED_BYTES);
     if (!stream)
         return false;
     memcpy(stream, selected + 18, 11);
@@ -273,8 +279,8 @@ extern "C" bool s25_to_hal(uint8_t *out, void *codec) {
                      : (selected[9] & 0xf8) == 0x40 ? 44100
                                                     : 48000;
     a->channel_mode = 0;
-    a->bits = s25::flags_bits(((uint8_t *)codec)[0x1ad]);
-    a->mode = s25::hal_mode(s25::flags_mode(((uint8_t *)codec)[0x1ad]));
+    a->bits = s25::flags_bits(flags);
+    a->mode = s25::hal_mode(s25::flags_mode(flags));
     for (unsigned i = 0; i < 6; i++) {
         a->buffering[i] = i % 2 ? 50 : 20;
         a->ttp[i] = (int8_t)(selected[11 + i] - 128);
@@ -282,15 +288,15 @@ extern "C" bool s25_to_hal(uint8_t *out, void *codec) {
     // Lossless HQ bounds request, not measured buffering. R2.1 packing doubles
     // the max field, but the inspected DSP INIT ignores maxHQ; min60 is below
     // its observed TTP candidate and does not establish added playout delay.
-    if (s25::flags_mode(((uint8_t *)codec)[0x1ad]) == s25::kModeLossless) {
+    if (s25::flags_mode(flags) == s25::kModeLossless) {
         a->buffering[2] = 60;
         a->buffering[3] = 100;
     }
     a->fade_ms = 255;
-    a->stream = {stream, stream + 11, stream + 11};
+    a->stream = {stream, stream + S25_LATENCY_TAGGED_BYTES, stream + S25_LATENCY_TAGGED_BYTES};
     *(uint32_t *)(out + 0x58) = 4;
     *(uint32_t *)out = 9;
-    return s25::adaptive_valid(out);
+    return s25::latency_tag_write(out, flags) && s25::adaptive_valid(out);
 }
 extern "C" bool s25_adjust_offload(uint8_t *config) {
     if (*(uint32_t *)config != 8)
@@ -340,8 +346,20 @@ extern "C" bool s25_enabled(const uint8_t *cfg) {
 }
 #else
 extern "C" bool s25_validate(const uint8_t *session, const uint8_t *cfg) {
-    if (*(const uint32_t *)cfg == 9)
-        return (*session == 2 || *session == 11) && s25::adaptive_valid(cfg);
+    if (cfg && *(const uint32_t *)cfg == 9)
+        return s25::latency_validate_and_capture(session ? *session : 0,
+                                                const_cast<uint8_t *>(cfg));
+    s25::latency_context_invalidate();
     return tramp_validate(session, cfg);
+}
+extern "C" void s25_report_config(void *session, const uint8_t *cfg) {
+    // START validates before its first copy; UPDATE bypasses validation and instead
+    // reaches this entry before both its session copy and its PAL-facing callback.
+    if (cfg && *(const uint32_t *)(cfg + 0x68) == 1)
+        s25::latency_validate_and_capture(session ? ((uint8_t *)session)[0x28] : 0,
+                                        const_cast<uint8_t *>(cfg));
+    else
+        s25::latency_context_invalidate();
+    tramp_report_config(session, cfg);
 }
 #endif

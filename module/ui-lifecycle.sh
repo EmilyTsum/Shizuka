@@ -43,6 +43,7 @@ case "${1:-start}" in
    fi
    if [ -e "$MODDIR/disable" ] && [ -f "$MODDIR/settings-bridge.sh" ];then
     "$BB" sh "$MODDIR/settings-bridge.sh" stop || true
+    if [ -f "$STATE/active" ];then "$BB" sh "$MODDIR/control.sh" rollback || true;fi
    fi
    sleep 2
   done

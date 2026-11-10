@@ -416,6 +416,10 @@ class Profiles(unittest.TestCase):
             ".no-auto",
             ".enable-dual-mode",
             "disable",
+            "latency-provider",
+            "latency-provider.sha256",
+            "latency-runtime-build.json",
+            "latency-runtime.identity",
         ]:
             path = repository / "module" / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -467,13 +471,103 @@ class Profiles(unittest.TestCase):
                     ".enable-dual-mode",
                     "disable",
                     "payload/untracked.so",
+                    "latency-provider",
+                    "latency-provider.sha256",
+                    "latency-runtime-build.json",
+                    "latency-runtime.identity",
                 }.intersection(names)
             )
             self.assertIsNone(archive.testzip())
             self.assertEqual(archive.read("settings.apk"), b"synthetic companion APK fixture")
+            self.assertEqual(
+                {name for name in names if name.startswith("webroot/")},
+                set(package.NATIVE_ENTRY_ASSETS),
+            )
+            for name, expected in package.NATIVE_ENTRY_ASSETS.items():
+                self.assertEqual(package.sha(archive.read(name)), expected)
+            self.assertEqual(
+                {
+                    name for name in names
+                    if pathlib.PurePosixPath(name).suffix.lower() in {".html", ".htm", ".css", ".js"}
+                },
+                set(package.NATIVE_ENTRY_ASSETS),
+            )
+        # Optional extras have their own identity and never join the core
+        # manifest or inherit a heard-audio proof from the source module.
+        latency = {
+            "schema": 1, "activation_requested": False, "device_proof": False,
+            "diagnostic_only": False, "diagnostic_zero_ttp": False,
+            "experimental_raw_island": False,
+            "cookie": "abcd" * 8, "outputs": {},
+            "core": {"outputs": {
+                role: digest(self.d / self.profile.data["payloads"][role])
+                for role in ("native", "hal")
+            }},
+        }
+        for name in ("latency-provider", "patched-libar-gsl.so"):
+            (self.d / name).write_bytes(("verified synthetic " + name).encode())
+            latency["outputs"][name] = digest(self.d / name)
+        (self.d / package.LATENCY_BUILD).write_text(json.dumps(latency))
+        with patch.object(package, "verify_latency_runtime", return_value=latency), contextlib.redirect_stdout(io.StringIO()):
+            package.main(with_latency_runtime=True)
+        with zipfile.ZipFile(next(package.DIST.glob("*-latency.zip"))) as archive:
+            self.assertEqual(archive.read("latency-provider"), (self.d / "latency-provider").read_bytes())
+            self.assertEqual(archive.read("payload/patched-libar-gsl.so"), (self.d / "patched-libar-gsl.so").read_bytes())
+            self.assertEqual(
+                archive.read("latency-runtime.identity").decode(),
+                package.latency_runtime_identity(latency),
+            )
+            self.assertEqual(len(archive.read("payloads.sha256").splitlines()), 4)
+            self.assertEqual(archive.read("proofs/offline-ready").decode(), package.sha(archive.read("payloads.sha256")) + "\n")
+            self.assertNotIn("proofs/verified-payloads.sha256", archive.namelist())
+            self.assertFalse(any(name.startswith("state/") for name in archive.namelist()))
+        with patch.object(package, "verify_latency_runtime", side_effect=ValueError("stale latency identity")):
+            with self.assertRaisesRegex(ValueError, "stale latency identity"):
+                package.main(with_latency_runtime=True)
+        # An obsolete UI copied into an upgrade checkout must not be shipped.
+        for relative in [
+            "webroot/status.js", "webroot/status.css", "webroot/extra.html",
+            "webroot/nested/entry", "webui/status.js", "status.css",
+        ]:
+            path = repository / "module" / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("obsolete browser UI fixture")
+            with self.assertRaisesRegex(ValueError, "Only native settings UI is supported"):
+                package.main()
+            path.unlink()
+            if path.parent not in {repository / "module", repository / "module/webroot"}:
+                path.parent.rmdir()
+        for relative in package.NATIVE_ENTRY_ASSETS:
+            path = repository / "module" / relative
+            original = path.read_bytes()
+            path.write_bytes(original + b"\nmodified launcher fixture\n")
+            with self.assertRaisesRegex(ValueError, "unapproved launcher asset"):
+                package.main()
+            path.write_bytes(original)
+            path.unlink()
+            with self.assertRaisesRegex(ValueError, "native launcher is incomplete"):
+                package.main()
+            path.write_bytes(original)
+        target = repository / "module/webroot/launcher.js"
+        original = target.read_bytes()
+        target.unlink()
+        target.symlink_to(ROOT / "module/webroot/launcher.js")
+        with self.assertRaisesRegex(ValueError, "unapproved launcher asset"):
+            package.main()
+        target.unlink()
+        target.write_bytes(original)
         (self.d / "Shizuka-settings.apk").write_bytes(b"changed after build")
         with self.assertRaisesRegex(ValueError, "Settings APK is stale"):
             package.main()
+
+    def test_kernelsu_native_entry_has_only_a_fixed_one_shot_launch(self):
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "Node.js is required to verify the KernelSU entry bridge")
+        result = subprocess.run(
+            [node, str(ROOT / "tests/native_settings_entry_test.cjs")],
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

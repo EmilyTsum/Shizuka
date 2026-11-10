@@ -45,7 +45,10 @@ SPEC = {
             "ll_msg_send": 0x9B85FC,
         },
     ),
-    "hal": ("libsehbluetooth_audio_session_aidl.so", {"validate": 0xE988}),
+    "hal": (
+        "libsehbluetooth_audio_session_aidl.so",
+        {"validate": 0xE988, "report_config": 0x1BC7C},
+    ),
 }
 
 
@@ -165,6 +168,7 @@ def build(profile):
             str(DRIVER_SRC / "ui.cpp"),
             str(DRIVER_SRC / "coexist.cpp"),
             str(SRC / "protocol.cpp"),
+            str(SRC / "latency_context.cpp"),
             str(SRC / "aptx_ll.cpp"),
             str(SRC / "aptx_ll_backend.cpp"),
             str(DRIVER_SRC / "aptx_ll_native.cpp"),
@@ -496,6 +500,7 @@ def host_cases(jni):
                 "protocol.cpp",
                 "payload.cpp",
                 "layout.cpp",
+                "latency_context.cpp",
                 "aptx_ll.cpp",
                 "aptx_ll_native.cpp",
             ],
@@ -506,7 +511,12 @@ def host_cases(jni):
             ["ui.cpp", "protocol.cpp", "aptx_ll.cpp", "aptx_ll_native.cpp"],
             jni,
         ),
-        ("layout_stability", ["layout.cpp", "protocol.cpp"], []),
+        ("layout_stability", ["layout.cpp", "protocol.cpp", "latency_context.cpp"], []),
+        (
+            "latency_context",
+            ["layout.cpp", "protocol.cpp", "latency_context.cpp", "payload.cpp"],
+            ["-DS25_HAL_ONLY", "-DS25_MALLOC_GOT=0xea65e0"],
+        ),
     ]
 
 
@@ -516,3 +526,6 @@ def verify_dispatch(profile):
     if profile.id != "sm-s931z-dzif-aptx-experiment":
         raise ValueError("Dispatch verification requires the DZIF profile")
     subprocess.run([sys.executable, str(ROOT / "tests/dispatch_emulation_check.py")], check=True)
+    subprocess.run(
+        [sys.executable, str(ROOT / "tests/latency_context_emulation_check.py")], check=True
+    )

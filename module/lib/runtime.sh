@@ -48,9 +48,34 @@ saved_process_matches() (
  fi
 )
 token_matches() { [ -n "$2" ] && [ -f "$1" ] && [ "$(cat "$1" 2>/dev/null)" = "$2" ]; }
-qhs_pending() { [ -e "$STATE/qhs-nvm/intent" ] || [ -e "$STATE/qhs-nvm/restoring" ]; }
+qhs_pending() { [ -e "$STATE/qhs-nvm/intent" ] || [ -L "$STATE/qhs-nvm/intent" ] || [ -e "$STATE/qhs-nvm/restoring" ] || [ -L "$STATE/qhs-nvm/restoring" ]; }
+application_fence() {
+ case "$1" in check|health|reconcile) ;;*) return 1;;esac
+ if [ -e "$MODDIR/latency-apply-fence.sh" ] || [ -L "$MODDIR/latency-apply-fence.sh" ];then
+  [ -f "$MODDIR/latency-apply-fence.sh" ] && [ ! -L "$MODDIR/latency-apply-fence.sh" ] || return 1
+  application_fence_attributes=$("$BB" stat -c '%u:%a:%h' "$MODDIR/latency-apply-fence.sh") || return 1
+  case "$application_fence_attributes" in 0:*:1) ;;*) return 1;;esac
+  application_fence_permissions=${application_fence_attributes#0:};application_fence_permissions=${application_fence_permissions%:1}
+  case "$application_fence_permissions" in ''|*[!0-7]*) return 1;;esac
+  [ "$((0$application_fence_permissions & 022))" = 0 ] || return 1
+  "$BB" timeout -s TERM -k 1 5 "$BB" sh "$MODDIR/latency-apply-fence.sh" "$1"
+ else
+  # Older packages cannot interpret a newer operation journal. Cleanup remains
+  # available, but absence of its reader cannot authorize a new mutation.
+  [ ! -e "$STATE/latency-application" ] && [ ! -L "$STATE/latency-application" ]
+ fi
+}
+physical_recovery_pending() {
+ [ -e "$STATE/active" ] || [ -L "$STATE/active" ] || [ -e "$STATE/armed" ] || [ -L "$STATE/armed" ] || \
+  [ -s "$STATE/mounts.tsv" ] || [ -L "$STATE/mounts.tsv" ] || \
+  [ -e "$STATE/latency-runtime.active" ] || [ -L "$STATE/latency-runtime.active" ] || \
+  [ -e "$STATE/latency-remote-uncertain" ] || [ -L "$STATE/latency-remote-uncertain" ] || \
+  [ -e "$STATE/latency-provider.pid" ] || [ -L "$STATE/latency-provider.pid" ] || \
+  [ -e "$STATE/latency-provider.start" ] || [ -L "$STATE/latency-provider.start" ] || \
+  [ -e "$STATE/dsp-trial.active" ] || [ -L "$STATE/dsp-trial.active" ] || qhs_pending
+}
 recovery_pending() {
- [ -f "$STATE/active" ] || [ -f "$STATE/armed" ] || [ -s "$STATE/mounts.tsv" ] || qhs_pending
+ physical_recovery_pending || ! application_fence check >/dev/null 2>&1
 }
 
 prepare_state() {
@@ -83,4 +108,5 @@ verify_active_payloads() {
  verify_live_file "$live_bt" "$NATIVE" "$NATIVE_PAYLOAD"
  verify_live_file "$live_bt" "$APK" "$APK_PAYLOAD"
  verify_live_file "$live_hal" "$HAL" "$HAL_PAYLOAD"
+ if command -v profile_verify_runtime >/dev/null 2>&1;then profile_verify_runtime "$live_hal";fi
 }

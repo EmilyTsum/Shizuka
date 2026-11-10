@@ -13,8 +13,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "tools/android-app"
 BUILD = ROOT / "build"
-VERSION_CODE = 17
-VERSION_NAME = "0.10.0-test"
+VERSION_CODE = 18
+VERSION_NAME = "0.11.0-test"
 PACKAGE = "dev.shizuka.settings"
 
 
