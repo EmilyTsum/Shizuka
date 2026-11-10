@@ -166,30 +166,98 @@ public class BtStatus {
         }
         return out;
     }
+    private static JSONObject encoderHistory(JSONObject telemetry, boolean sameSession, long savedAt) throws Exception {
+        JSONObject source = telemetry.optJSONObject("fields"), fields = new JSONObject();
+        if (source != null && source.length() <= 100) {
+            for (String key : new String[] {"encoder_state", "encoder_level", "quality_level",
+                    "feedback_quality_level", "feedback_bitrate_level", "desired_encoder_bitrate_raw", "encoder_frame_bitrate_bps", "qhs", "sample_rate_hz", "calculated_ttp_us"}) {
+                JSONObject field = source.optJSONObject(key);
+                if (field == null || field.isNull("value")) continue;
+                Object value = field.opt("value");
+                if (!(value instanceof String || value instanceof Number || value instanceof Boolean)) continue;
+                if (value instanceof String && ((String)value).length() > 100) continue;
+                JSONObject saved = new JSONObject(field.toString());
+                saved.put("fresh", false).put("scope", "history");
+                fields.put(key, saved);
+            }
+        }
+        long observedAt = savedAt;
+        JSONObject state = fields.optJSONObject("encoder_state");
+        if (state == null) state = fields.optJSONObject("quality_level");
+        double ageAtSave = state == null ? -1 : state.optDouble("age_seconds", -1);
+        if (Double.isFinite(ageAtSave) && ageAtSave >= 0 && ageAtSave * 1000 <= savedAt)
+            observedAt = savedAt - (long)(ageAtSave * 1000);
+        JSONArray transitions = new JSONArray(), sourceTransitions = telemetry.optJSONArray("encoder_transitions");
+        if (sourceTransitions != null && sourceTransitions.length() <= 8) for (int i = 0; i < sourceTransitions.length(); i++) {
+            JSONObject entry = sourceTransitions.optJSONObject(i);
+            if (entry == null || !entry.optString("state").matches("STATE_ENCLEVEL_[0-4]|STATE_ENCLEVEL_5_LOSSLESS")) continue;
+            double age = entry.optDouble("age_seconds", -1);
+            if (!Double.isFinite(age) || age < 0 || age * 1000 > savedAt) continue;
+            String previous = entry.optString("previous", "");
+            transitions.put(new JSONObject().put("state", entry.optString("state"))
+                .put("previous", previous.matches("STATE_ENCLEVEL_[0-4]|STATE_ENCLEVEL_5_LOSSLESS") ? previous : JSONObject.NULL)
+                .put("observed_at_ms", savedAt - (long)(age * 1000)).put("source", "encoder packet summary"));
+        }
+        return new JSONObject().put("available", fields.length() > 0).put("current", false)
+            .put("same_session", sameSession).put("saved_at_ms", savedAt)
+            .put("observed_at_ms", observedAt)
+            .put("capture_id", telemetry.optString("capture_id", ""))
+            .put("fields", fields).put("encoder_transitions", transitions).put("label", "Historical capture; not current playback");
+    }
+    private static boolean observationSession(JSONObject observation) {
+        try {
+            String bt = read(moduleRoot.resolve("state/bt.pid").toString());
+            String hal = read(moduleRoot.resolve("state/hal.pid").toString());
+            return bt.matches("[1-9][0-9]+") && hal.matches("[1-9][0-9]+") &&
+                Files.isDirectory(Paths.get("/proc", bt)) && Files.isDirectory(Paths.get("/proc", hal)) &&
+                bt.equals(observation.optString("bluetooth_pid")) && hal.equals(observation.optString("hal_pid")) &&
+                BtDiagnostics.start(bt).equals(observation.optString("bluetooth_start")) &&
+                BtDiagnostics.start(hal).equals(observation.optString("hal_start")) &&
+                read(moduleRoot.resolve("state/bt.start").toString()).equals(observation.optString("bluetooth_start")) &&
+                read(moduleRoot.resolve("state/hal.start").toString()).equals(observation.optString("hal_start")) &&
+                read("/proc/sys/kernel/random/boot_id").equals(observation.optString("boot_id"));
+        } catch (Exception expired) { return false; }
+    }
+    private static JSONObject savedEncoderHistory() {
+        try {
+            Path path = DATA.resolve("encoder-history.json");
+            String text = read(path.toString());
+            if (text.isEmpty()) return null;
+            JSONObject saved = new JSONObject(text);
+            if (saved.optInt("schema") != 2) return null;
+            long at = saved.optLong("collected_at_ms", 0);
+            if (at <= 0) at = Files.getLastModifiedTime(path).toMillis();
+            return encoderHistory(saved, observationSession(saved), at);
+        } catch (Exception invalid) { return null; }
+    }
     static JSONObject telemetry(JSONObject route, JSONArray devices) throws Exception {
         JSONObject out =
             new JSONObject().put("available", false).put("reason", "Diagnostics are not running");
         if (!CodecPresentation.SAMSUNG_DZIF.equals(deviceProfile())) return out;
+        JSONObject savedHistory = savedEncoderHistory();
+        if (savedHistory != null) out.put("history", savedHistory);
         Path telemetry = DATA.resolve("telemetry.json");
         if (!Files.exists(telemetry)) telemetry = LEGACY_DATA.resolve("telemetry.json");
         String text = read(telemetry.toString());
         if (text.isEmpty())
             return out;
         JSONObject t = new JSONObject(text);
-        if (t.optInt("schema") != 2 || !t.optBoolean("running"))
-            return out.put("reason", t.optString("reason", "No current encoder observation"));
-        String bt = read(moduleRoot.resolve("state/bt.pid").toString());
-        String hal = read(moduleRoot.resolve("state/hal.pid").toString());
-        if (!bt.matches("[1-9][0-9]+") || !hal.matches("[1-9][0-9]+") ||
-            !Files.isDirectory(Paths.get("/proc", bt)) ||
-            !Files.isDirectory(Paths.get("/proc", hal)) ||
-            !bt.equals(t.optString("bluetooth_pid")) || !hal.equals(t.optString("hal_pid")) ||
-            !BtDiagnostics.start(bt).equals(t.optString("bluetooth_start")) ||
-            !BtDiagnostics.start(hal).equals(t.optString("hal_start")) ||
-            !read(moduleRoot.resolve("state/bt.start").toString()).equals(t.optString("bluetooth_start")) ||
-            !read(moduleRoot.resolve("state/hal.start").toString()).equals(t.optString("hal_start")) ||
-            !read("/proc/sys/kernel/random/boot_id").equals(t.optString("boot_id")))
+        if (t.optInt("schema") != 2)
+            return out.put("reason", "Unsupported DSP observation format");
+        boolean sameSession = observationSession(t);
+        long savedAt = t.optLong("collected_at_ms", 0);
+        if (savedAt <= 0) savedAt = Files.getLastModifiedTime(telemetry).toMillis();
+        JSONObject history = encoderHistory(t, sameSession, savedAt);
+        if (savedHistory != null && savedHistory.optBoolean("available") &&
+                savedHistory.optLong("observed_at_ms") >= history.optLong("observed_at_ms")) history = savedHistory;
+        else if (savedHistory != null && !hasEncoderHistory(history)) history = savedHistory;
+        out.put("history", history).put("running", t.optBoolean("running"));
+        if (!t.optBoolean("running"))
+            return out.put("reason", t.optString("reason", "Capture ended; showing history separately"));
+        if (!sameSession)
             return out.put("reason", "DSP observation belongs to a different session");
+        /* The checks above bind historical and live views to the exact process
+         * generation. History is never promoted to a current observation. */
         JSONObject loader = t.optJSONObject("loader");
         if (loader != null) {
             double loadAge = System.nanoTime() / 1e9 - loader.optDouble("monotonic_s", -1);
@@ -235,8 +303,12 @@ public class BtStatus {
         }
         if (!match || a2dpContexts != 1)
             return out.put("reason", "DSP observation does not match the selected codec");
-        t.put("available", true).put("age_seconds", age);
+        t.put("available", true).put("age_seconds", age).put("history", history);
         return t;
+    }
+    private static boolean hasEncoderHistory(JSONObject history) {
+        JSONObject fields = history == null ? null : history.optJSONObject("fields");
+        return fields != null && (fields.has("encoder_state") || fields.has("quality_level"));
     }
     static JSONObject selectionSnapshot() throws Exception {
         JSONObject result = new JSONObject().put("collected_at_ms", System.currentTimeMillis())

@@ -71,6 +71,11 @@ def native_source(driver, name):
 
 def offline_sources_fingerprint():
     sources = [
+        *(
+            path for subdir in ("runtime", "gsl_hook", "transport/native", "provider", "application")
+            for path in (ROOT / "experiments/latency" / subdir).rglob("*")
+            if path.suffix in {".c", ".h", ".cpp", ".S", ".ld", ".py", ".java"}
+        ),
         *(path for path in (ROOT / "src").rglob("*") if path.suffix in {".c", ".cpp", ".h", ".ld"}),
         # The companion has its own source-bound APK build. A screen-only edit
         # must not invalidate native encoder tests or trigger a Bluetooth rebuild.

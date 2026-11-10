@@ -12,6 +12,37 @@ public final class DiagnosticStoreTest {
         int uid = ((Number)Files.getAttribute(root, "unix:uid")).intValue();
         try {
             DiagnosticStore store = new DiagnosticStore(root, uid);
+            String token = UUID.randomUUID().toString(), other = UUID.randomUUID().toString();
+            check(!ObservationLease.renew(store, token, 1));
+            try (ObservationLease lease = ObservationLease.begin(store, token, 100)) {
+                check(lease.alive(101));
+                check(!ObservationLease.stop(store, other) && lease.alive(102));
+                check(ObservationLease.renew(store, token, 200));
+                check(lease.alive(ObservationLease.TTL_NS + 199));
+                check(!lease.alive(ObservationLease.TTL_NS + 200));
+                check(!ObservationLease.renew(store, token, ObservationLease.TTL_NS + 200));
+            }
+            ObservationLease old = ObservationLease.begin(store, token, 500);
+            check(ObservationLease.stop(store, token) && !old.alive(501));
+            try (ObservationLease replacement = ObservationLease.begin(store, token, 502)) {
+                old.close(); check(replacement.alive(503)); // old owner cannot delete a newer generation
+                try { ObservationLease.begin(store, token, 504); throw new AssertionError(); }
+                catch (FileAlreadyExistsException expected) { assertions++; }
+            }
+            for (String invalid : Arrays.asList("../x", "", token.toUpperCase(Locale.ROOT), "session-" + token)) {
+                try { ObservationLease.stop(store, invalid); throw new AssertionError(); }
+                catch (IllegalArgumentException expected) { assertions++; }
+            }
+            try (ObservationLease lease = ObservationLease.begin(store, UUID.randomUUID().toString())) {
+                java.util.concurrent.atomic.AtomicReference<Throwable> error = new java.util.concurrent.atomic.AtomicReference<>();
+                Thread reader = new Thread(() -> {
+                    try { for (int i = 0; i < 100; i++) if (!lease.alive()) throw new AssertionError(); }
+                    catch (Throwable failure) { error.set(failure); }
+                });
+                reader.start();
+                for (int i = 0; i < 100; i++) check(lease.alive());
+                reader.join(); check(error.get() == null);
+            }
             store.atomic(root, "telemetry.json", ControlJson.object("available", false, "reason", "capture ended"));
             store.check(root.resolve("telemetry.json"), false); assertions++;
             Path session = store.sessions.resolve("session-" + UUID.randomUUID()); store.directory(session);

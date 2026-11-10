@@ -42,7 +42,7 @@ def main():
         assert lines[-1] == "NATIVE_CAPTURE_PASSED"
         assert json.loads(lines[0])["text"] == 'A "quoted"\\line\nnext'
         print(
-            "DSP capture: real escaped/bounded records, malformed input, detached timeout, owner death and replacement-file preservation passed under ASan/UBSan"
+            "DSP capture: bounded/filtered records, detached timeout, owner death, automatic dead-owner recovery and live/unowned/replaced FARF preservation passed under ASan/UBSan"
         )
 
 

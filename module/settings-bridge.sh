@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-# Started only by KernelSU Action; the app never needs its own root grant.
+# Started by an authenticated normal-app bootstrap or optional KernelSU entry.
 set -eu
 BB=/data/adb/ksu/bin/busybox
 MODDIR=$("$BB" readlink -f "${0%/*}")

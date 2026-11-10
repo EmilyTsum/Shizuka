@@ -1,23 +1,27 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'">
-<title>Shizuka · Bluetooth status</title>
-<link rel="stylesheet" href="status.css">
-<script src="status.js" defer></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <title>Open Shizuka</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: max(28px, env(safe-area-inset-top)) 24px 32px; }
+    main { max-width: 28rem; margin: 12vh auto 0; }
+    h1 { font-size: 2rem; margin: 0 0 20px; }
+    p { line-height: 1.55; }
+    button { min-height: 48px; padding: 12px 22px; margin: 12px 0; border: 0; border-radius: 24px; font: inherit; }
+    .hint { font-size: .9rem; opacity: .75; }
+  </style>
+  <script src="launcher.js" defer></script>
 </head>
 <body>
-<main>
-<header><div><p class="eyebrow">SHIZUKA</p><h1>Bluetooth status</h1></div><span id="state" class="badge">Ready</span></header>
-<p id="message" role="status">Open this page from the Shizuka module in KernelSU.</p>
-<section class="card hero" aria-labelledby="route-label"><p id="route-label" class="label">MEDIA ROUTE</p><h2 id="transport">—</h2><p id="device" class="muted">No snapshot yet</p></section>
-<section class="card" aria-labelledby="selection-label"><h2 id="selection-label">Android selection</h2><p id="codec" class="codec">—</p><dl><div><dt>Sample rate</dt><dd id="rate">—</dd></div><div><dt>Bit depth</dt><dd id="bits">—</dd></div><div><dt id="mode-label">Mode</dt><dd id="mode">—</dd></div><div><dt>A2DP playback flag</dt><dd id="stream">—</dd></div><div><dt>System audio mode</dt><dd id="audio-mode">—</dd></div></dl><p class="note">Audio can continue when the A2DP playback flag is clear after reconfiguration.</p><p id="selection-note" class="note">The Android selection is separate from the DSP input format and actual radio transmission.</p></section>
-<section class="card" aria-labelledby="dsp-label"><h2 id="dsp-label">DSP observation</h2><p id="dsp-note" class="muted">Not observed. Diagnostics are not running.</p><dl id="dsp-values" hidden><div><dt>Encoder state</dt><dd id="encoder">—</dd></div><div><dt>Quality / DSP QHS flag</dt><dd id="quality">—</dd></div><div><dt>System mode / latency state</dt><dd id="dsp-mode">—</dd></div><div><dt>TTP calculation</dt><dd id="dsp-ttp">—</dd></div><div><dt>HQ target word</dt><dd id="dsp-target">—</dd></div><div><dt>Lossless encoder observation</dt><dd id="dsp-lossless">—</dd></div><div><dt>Packet interval</dt><dd id="interval">—</dd></div><div><dt>Observed age</dt><dd id="age">—</dd></div></dl><details id="dsp-details" hidden><summary>Fields, sources and freshness</summary><pre id="dsp-fields"></pre></details><p class="note">Lossless transmission: <strong>unverified</strong>. An encoder state alone is not a bit-perfect verification.</p></section>
-<div class="actions"><button id="refresh" type="button">Refresh</button><button id="copy" type="button" class="secondary" disabled>Copy status</button></div>
-<label class="autorefresh"><input id="auto" type="checkbox"> Refresh every 5 seconds while visible</label>
-<p id="updated" class="footer">Read-only. Refreshing does not change codecs or enable DSP logging.</p>
-</main>
+  <main>
+    <h1>Shizuka</h1>
+    <p id="launch-status" role="status" aria-live="polite">Opening native settings…</p>
+    <button id="open-native" type="button">Open Shizuka</button>
+    <p class="hint">All settings are in the native Shizuka interface. If it does not open, use this module’s Action in KernelSU.</p>
+  </main>
 </body>
 </html>

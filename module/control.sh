@@ -18,6 +18,11 @@ STATE="$MODDIR/state"
 case "${1:-}" in
  activate|commit|keep-verified|rollback|rollback-trial|rollback-health) lock_lifecycle;;
 esac
+case "${1:-}" in
+ activate|commit|keep-verified)
+  application_fence check > "$STATE/latency-application-fence.json" || fail 'An unresolved delay operation requires owned recovery before activation or commit'
+  ;;
+esac
 quiesce_radio() {
  cmd bluetooth_manager disable >/dev/null 2>&1 || return 1
  radio_wait=0
@@ -37,7 +42,9 @@ resume_radio() {
    [ "$radio_state" != ON ] || return 0
    sleep 1;radio_wait=$((radio_wait+1))
   done
+  return 1
  fi
+ return 0
 }
 start_health() {
  watched=$(cat "$STATE/bt.pid")
@@ -93,6 +100,62 @@ qhs_features() {
  "$BB" grep -Eq '"features_hex"[[:space:]]*:[[:space:]]*"'"$qhs_hex"'"' "$STATE/qhs-controller-features.json" || fail 'controller feature bytes differ from tested profile'
 
 }
+reconcile_application() {
+ if application_fence check > "$STATE/latency-application-fence.json" 2>&1;then return 0;fi
+ # Read-only physical verification plus metadata finalization. FD9 is inherited
+ # from this normal controller; the resident guardian's authority is not reused.
+ application_fence reconcile > "$STATE/latency-application-reconcile.json" 2>&1 || true
+ application_fence check > "$STATE/latency-application-fence.json" 2>&1
+}
+verify_stock_recovery() {
+ # This boundary is independent of the application reader/receipt. Retire
+ # physical markers only after every owned resource is actually normal again.
+ check_inputs || return 1
+ ! qhs_pending || return 1
+ for stock_marker in latency-runtime.active latency-remote-uncertain latency-provider.pid latency-provider.start dsp-trial.active;do
+  [ ! -e "$STATE/$stock_marker" ] && [ ! -L "$STATE/$stock_marker" ] || return 1
+ done
+ command -v profile_latency_recovery_preflight >/dev/null 2>&1 && \
+  command -v profile_latency_normal_ready >/dev/null 2>&1 || return 1
+ stock_boot=$(cat /proc/sys/kernel/random/boot_id) || return 1
+ printf '%s\n' "$stock_boot" | "$BB" grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' || return 1
+ stock_hal_start=$(process_start "$next_hal") || return 1
+ profile_latency_recovery_preflight && profile_latency_normal_ready "$next_hal" "$previous_hal" || return 1
+ stock_zygote=$(host_zygote) || return 1
+ case "$stock_zygote" in ''|*[!0-9]*|0) return 1;;esac
+ stock_bt=$(host_bt || true);stock_bt_start=''
+ if [ -n "$stock_bt" ];then
+  case "$stock_bt" in *[!0-9]*|0) return 1;;esac
+  stock_bt_start=$(process_start "$stock_bt") || return 1
+ fi
+ stock_count=0;stock_seen=' '
+ while IFS=' ' read -r stock_expected stock_target stock_extra;do
+  [ -n "$stock_expected" ] || continue
+  [ -z "${stock_extra:-}" ] && [ "${#stock_expected}" = 64 ] || return 1
+  case "$stock_expected" in *[!0-9a-f]*) return 1;;esac
+  allowed "$stock_target" || return 1
+  case "$stock_seen" in *" $stock_target "*) return 1;;esac
+  stock_seen="$stock_seen$stock_target ";stock_count=$((stock_count+1))
+  stock_actual=$(nsrun 1 "$BB" sha256sum "$stock_target") || return 1
+  [ "${stock_actual%% *}" = "$stock_expected" ] || return 1
+  case "$stock_target" in
+   "$NATIVE"|"$APK")
+    stock_actual=$(nsrun "$stock_zygote" "$BB" sha256sum "$stock_target") || return 1
+    [ "${stock_actual%% *}" = "$stock_expected" ] || return 1
+    if [ -n "$stock_bt" ];then
+     stock_actual=$(nsrun "$stock_bt" "$BB" sha256sum "$stock_target") || return 1
+     [ "${stock_actual%% *}" = "$stock_expected" ] || return 1
+    fi;;
+   "$HAL")
+    stock_actual=$(nsrun "$next_hal" "$BB" sha256sum "$stock_target") || return 1
+    [ "${stock_actual%% *}" = "$stock_expected" ] || return 1;;
+  esac
+ done < "$MODDIR/inputs.sha256"
+ [ "$stock_count" = "$STOCK_TARGET_COUNT" ] && [ "$stock_boot" = "$(cat /proc/sys/kernel/random/boot_id)" ] && \
+  [ "$(getprop "init.svc_debug_pid.$AUDIO_HAL_SERVICE")" = "$next_hal" ] && process_matches "$next_hal" "$stock_hal_start" || return 1
+ [ "$(host_bt || true)" = "$stock_bt" ] || return 1
+ [ -z "$stock_bt" ] || process_matches "$stock_bt" "$stock_bt_start"
+}
 rollback() (
  # Never inherit activation cleanup traps into the serialized recovery shell.
  trap - EXIT HUP INT TERM
@@ -110,9 +173,19 @@ rollback() (
    touch "$MODDIR/.no-auto"
    ;;
  esac
- if ! recovery_pending;then check_inputs;log 'already inactive; stock hashes match';return;fi
+ application_resolved=true
+ if ! reconcile_application;then application_resolved=false;fi
+ if ! physical_recovery_pending;then
+  check_inputs || return 1
+  if [ "$application_resolved" != true ];then
+   log 'application ownership remains fenced; no physical recovery markers are present; no audio state was changed'
+   return 1
+  fi
+  log 'already inactive; stock hashes match';return
+ fi
  (lock_policy;stop_policy) || return 1
  rm -f "$STATE/health-token"
+ if command -v profile_stop_runtime >/dev/null 2>&1;then profile_stop_runtime || return 1;fi
  qhs_restoring=0
  if qhs_pending;then
   "$BB" sh "$MODDIR/qhs-nvm.sh" remove || return 1
@@ -145,6 +218,10 @@ rollback() (
   if profile_hal_ready "$next_hal" "$previous_hal";then break;fi
   sleep 1;hal_wait=$((hal_wait+1))
  done
+ profile_hal_ready "$next_hal" "$previous_hal" || return 1
+ if command -v profile_finish_runtime_recovery >/dev/null 2>&1;then
+  profile_finish_runtime_recovery "$next_hal" || return 1
+ fi
  [ -z "$current_bt" ] || kill -TERM $current_bt 2>/dev/null || true
  sleep 3
  if [ "$qhs_restoring" = 1 ];then "$BB" sh "$MODDIR/qhs-nvm.sh" scan-restore;fi
@@ -153,19 +230,73 @@ rollback() (
   qhs_features false
   "$BB" sh "$MODDIR/qhs-nvm.sh" finish-remove
  fi
+ verify_stock_recovery || return 1
  rm -f "$STATE/active" "$STATE/experiment-unverified"
- check_inputs
  : > "$STATE/mounts.tsv"
- # Keep recovery armed until owned NVM + running controller + native cleanup
- # all verify. The subshell lock serializes manual/watchdog rollback attempts.
+ # Physical recovery is independently complete. Retire its markers even if a
+ # separate application receipt is unavailable, so an orphan cannot cause every
+ # later watchdog/manual attempt to restart already-normal audio again.
  rm -f "$STATE/armed"
  if [ -f "$STATE/watchdog.pid" ];then
   old_watch=$(cat "$STATE/watchdog.pid")
   if [ -f "/proc/$old_watch/cmdline" ] && "$BB" tr '\000' ' ' < "/proc/$old_watch/cmdline" | grep -F "$MODDIR/watchdog.sh" >/dev/null;then kill -TERM "$old_watch" 2>/dev/null || true;fi
  fi
+ if ! reconcile_application;then
+  log 'stock audio recovery verified; application metadata remains fenced; further recovery attempts will only verify metadata'
+  return 1
+ fi
  log 'verified stock hashes after unmount; restored properties and restarted audio/Bluetooth'
 )
+latency_application_entry() {
+ entry_command=$1;shift
+ operation_json=null
+ if [ "$entry_command" = latency-apply ];then
+  [ "$#" = 3 ] || fail 'latency-apply requires UUID HQ_MS LL_MS'
+ else
+  [ "$#" -le 1 ] || fail 'latency-apply-status accepts one optional UUID'
+ fi
+ if [ "$#" -gt 0 ];then
+  [ "${#1}" = 36 ] || fail 'Invalid delay operation identity'
+  printf '%s\n' "$1" | "$BB" grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' || fail 'Invalid delay operation identity'
+  operation_json="\"$1\""
+ fi
+ if [ "$entry_command" = latency-apply ];then
+  for delay_value in "$2" "$3";do
+   case "$delay_value" in 0|[1-9]|[1-9][0-9]|1[0-4][0-9]|150) ;;*) fail 'Delay must be a canonical integer from 0 to 150 ms';;esac
+  done
+ fi
+ if [ -f "$MODDIR/latency-apply.sh" ] && [ ! -L "$MODDIR/latency-apply.sh" ] && \
+  [ -f "$MODDIR/latency-application.dex" ] && [ -f "$MODDIR/latency-application.sha256" ];then
+  if [ "$entry_command" = latency-apply ];then
+   exec "$BB" sh "$MODDIR/latency-apply.sh" begin "$@"
+  else
+   exec "$BB" sh "$MODDIR/latency-apply.sh" status "$@"
+  fi
+ fi
+ # Absence cannot reconcile an earlier operation or authorize another mutation.
+ entry_boot=$(cat /proc/sys/kernel/random/boot_id)
+ [ "${#entry_boot}" = 36 ] || fail 'Invalid current boot identity'
+ printf '%s\n' "$entry_boot" | "$BB" grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' || fail 'Invalid current boot identity'
+ printf '{"schema":1,"scope":"latency_application","operation_id":%s,"operation_known":false,"current_operation_id":null,"current_boot_id":"%s","available":false,"current_context_supported":false,"disable_available":false,"accepted":false,"phase":"unavailable","terminal":true,"retry_safe":false,"applied":false,"disabled":false,"fresh":false,"lease_valid":false,"disable_receipt_valid":false,"current_config_matches":false,"pending_hq":true,"pending_ll":true,"reason":"The application helper is unavailable. Existing ownership has not been reconciled."}\n' "$operation_json" "$entry_boot"
+}
+latency_owned_entry() {
+ owned_command=$1;shift
+ [ "$#" = 10 ] || fail 'Invalid owned delay action arguments'
+ [ -f "$MODDIR/latency-apply-owned.sh" ] && [ ! -L "$MODDIR/latency-apply-owned.sh" ] || return 10
+ # The fixed handler verifies the inherited FD9 inode, guardian identity,
+ # private operation/capture bindings and deadline. Never reacquire FD9 here.
+ if [ "$owned_command" = latency-owned ];then
+  exec "$BB" sh "$MODDIR/latency-apply-owned.sh" execute "$@"
+ fi
+ if "$BB" sh "$MODDIR/latency-apply-owned.sh" validate-health "$@";then
+  start_health
+ else
+  return $?
+ fi
+}
 case "${1:-status}" in
+ latency-apply|latency-apply-status) latency_application_entry "$@";;
+ latency-owned|latency-owned-health) latency_owned_entry "$@";;
  status)
   if [ -f "$STATE/active" ];then
    verify_active_payloads
@@ -280,6 +411,8 @@ case "${1:-status}" in
   nsrun "$zpid" "$BB" umount -l "$APK"
   if [ "$qhs_enabled" = true ];then qhs_features true;fi
   touch "$STATE/active"
+  if command -v profile_start_runtime >/dev/null 2>&1;then profile_start_runtime || fail 'device runtime publisher failed';fi
+  if [ -e "$STATE/latency-runtime.active" ];then start_health || fail 'device runtime health watcher failed';fi
   log "loaded experiment; watchdog will restore stock after $trial_seconds seconds unless committed"
   ;;
  keep-verified)

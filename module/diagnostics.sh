@@ -9,9 +9,11 @@ actual=$("$BB" sha256sum "$MODDIR/policy.dex");actual=${actual%% *}
 [ "$actual" = "$expected" ] || { echo 'policy.dex hash mismatch' >&2;exit 1; }
 [ "$#" -gt 0 ] || set -- help
 case "${1:-help}" in
- capture|recover)
+ capture|observe|recover)
   if [ "$1" = capture ]; then
    [ "$#" = 2 ] || { echo 'usage: diagnostics.sh capture SECONDS (5..120)' >&2;exit 64; }
+  elif [ "$1" = observe ]; then
+   [ "$#" = 2 ] || { echo 'usage: diagnostics.sh observe TOKEN' >&2;exit 64; }
   else
    [ "$#" = 1 ] || exit 64
   fi
@@ -25,8 +27,9 @@ case "${1:-help}" in
   [ "$actual" = "$expected" ] || { echo 'dsp-capture hash mismatch' >&2;exit 1; }
   [ "$1" != recover ] || exec "$MODDIR/dsp-capture" --recover
   ;;
+ renew|stop) [ "$#" = 2 ] || exit 64 ;;
  list|export|help) ;;
- *) echo 'usage: diagnostics.sh capture SECONDS|list|export SESSION|recover|help' >&2;exit 64;;
+ *) echo 'usage: diagnostics.sh observe TOKEN|renew TOKEN|stop TOKEN|capture SECONDS|list|export SESSION|recover|help' >&2;exit 64;;
 esac
 export CLASSPATH="$MODDIR/policy.dex"
 exec app_process /system/bin BtDiagnostics "$MODDIR" "$@"

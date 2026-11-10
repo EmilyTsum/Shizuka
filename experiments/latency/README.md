@@ -1,13 +1,18 @@
 # External encoded TTP adjustment
 
-This experiment implements the byte transform for an external, runtime delay
-value while retaining the stock signed DSP. It is separate from the module
-build and is **not connected to live Bluetooth playback**. No experiment is
-automatically applied by installing the module or opening KernelSU Action.
+This experiment implements an encoded-byte transform, a root-side lease
+provider and an in-HAL transport for an external runtime delay value while
+retaining the stock signed DSP. It is excluded from ordinary module packages
+and can be included with explicit optional packaging. Controlled live trials
+have reached attach, owned graph OPEN, default calibration, MAP, event
+registration and encoder INIT acknowledgements. **Completed RD/WR forwarding,
+an applied positive TTP change and receiver timing remain unconfirmed.**
+Installing the optional package or opening either KernelSU UI entry does not
+automatically activate the experiment.
 
 See the [validation record](VALIDATION.md) for completed checks and their scope.
 
-The proposed route is the existing Adaptive encoder → signed shared-memory RD
+The implemented experimental route is the existing Adaptive encoder → signed shared-memory RD
 endpoint → APSS transform → signed WR endpoint → existing logger/connection
 proxy. APSS changes the encoded packet's target time to play (TTP) after
 encoding. This does not require changing or re-signing the encoder image.
@@ -32,8 +37,11 @@ buffer or retransmission budget.
 - `python/generate_fixture.py` creates deterministic synthetic input for
   repeatable local debugging. No firmware or captured audio is included.
 - [Transport and session contract](TRANSPORT-LIFECYCLE.md) records the required
-  HAL ownership, buffer/cache transitions and teardown behavior for a future
-  live route.
+  HAL ownership, buffer/cache transitions, current checkpoints and teardown.
+- `runtime/` binds the owner to the reviewed existing GSL/GPR/OSAL instance;
+  `transport/native/` contains the bounded asynchronous buffer state machine.
+- `provider/` publishes the root-authorized configuration lease consumed by
+  the in-HAL owner. It does not give the HAL access to the private config file.
 
 ## External value and mode contract
 
@@ -49,10 +57,10 @@ directory and file must belong to the effective user and have modes 0700 and
 
 This config reader belongs to the root-side file tool. The actual HAL runs as
 `audioserver` and cannot read the root-owned private configuration directly.
-A future in-HAL transform needs an authenticated root/HAL provider to deliver
-an immutable typed value with its session authority. That provider is not
-implemented. Do not make the configuration world-readable or assume the HAL
-has root access.
+The implemented provider delivers a bounded typed lease with its boot, build
+and session authority; the in-HAL reader freezes the accepted value for an
+owned epoch. The private configuration remains root-only. Successful lease
+delivery does not establish graph readiness or a completed encoded transfer.
 
 Alternatively, pass `--delta-us` for a direct value. It is mutually exclusive
 with `--config`; neither method needs a DSP or executable rebuild. For
@@ -60,11 +68,13 @@ example, `150000` means an additional 150 ms. A direct value must be an exact
 multiple of 8 µs. This connects the saved setting to the file transform only;
 the live transport and receiver remain unvalidated.
 
-A live owner must independently identify the actual mode and graph epoch,
-select the corresponding typed setting, and take one immutable snapshot for
-the complete returned RD buffer. Split-channel wrappers in that buffer must
-use the same snapshot. A settings label or a plausible packet header cannot
-establish the active codec. Profile changes invalidate the previous epoch.
+A live owner must independently identify the actual mode and graph epoch and
+freeze the corresponding typed setting when that graph epoch starts. Every
+buffer and split-channel wrapper in that epoch uses the same immutable value.
+Midstream edits remain pending for the next session until receiver timeline
+behavior has been validated. A settings label or a plausible packet header
+cannot establish the active codec. Profile changes invalidate the previous
+epoch. The offline file CLI still takes a separate snapshot for each call.
 
 The implemented profile is explicitly `stock-r3-hq-44100`. LL, Lossless,
 legacy framing and other sample rates are rejected. Existing INIT information
@@ -127,7 +137,7 @@ and 16 rejection cases. An Android ARM64 build has also transformed files on
 the phone with matching output. Those are byte-format tests, not live RD/WR or
 receiver latency tests.
 
-## Work required for a live route
+## Live validation and ownership
 
 The actual `audio_pkt_dlkm.ko` uses a shared response queue across file
 descriptors. Its file-release path unconditionally calls
@@ -146,14 +156,14 @@ no retry or endpoint-data operation may rely on that handle. The probe never
 opened a relay graph. The stock payload session is recovered through the
 module's existing activation path, separately from these experiments.
 
-The actual Adaptive graph has been identified, and the fresh-open GSL path is
-being investigated. Its existing IMCL links must remain intact. The RD/WR OLC
+The actual Adaptive graph and fresh-open GSL path are integrated. Its existing
+IMCL links remain intact. The RD/WR OLC
 client configuration also requires the container's offload-info state; adding
 endpoint parameters to an ordinary container alone is insufficient. Static
 firmware analysis identifies parent-container property `0x080010cb` as the
-path that creates this state. Treating APSS as the parent and pacing both
-disjoint paths inside the same container remain unvalidated. No relay graph
-has been opened by this experiment.
+path that creates this state. The resulting fresh graph OPEN has received a
+successful acknowledgement. Complete APSS-parent event propagation, pacing
+both disjoint paths and successful RD/WR forwarding remain unvalidated.
 
 The transport needs owned shared-memory mappings, cache synchronization,
 token/epoch matching, bounded queues and confirmed RD/WR completion before a
@@ -166,12 +176,13 @@ fresh graph. An unsupported GET response or timeout does not prove a proposed
 ID is unused. Size-query and blob-fill changes must use one provider revision;
 failure after advertising a larger graph must abort that open operation.
 
-For temporary root, the future relay belongs to the current module/root
+For temporary root, the relay belongs to the current module/root
 session and must not require persistent root or an independent app root grant.
 Opening KernelSU Action should only open the module-owned internal UI. A relay
 owner must stop accepting new buffers on module disable/removal, root-session
 loss, graph replacement or process exit, and resolve owned DSP buffers before
 freeing them. A reboot invalidates the previous session; a later root/late-load
-session needs fresh identity and ownership checks. This repository contains
-the transform building block; these live ownership and cleanup mechanisms are
-not enabled by the offline CLI.
+session needs fresh identity and ownership checks. The in-HAL owner implements
+these guards and the separate root provider publishes its expiring authority.
+They are not enabled by the offline file CLI, and live completion/recovery
+still requires validation through the existing owner.

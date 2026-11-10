@@ -1,8 +1,13 @@
 # Validation record — 2026-11-10
 
-This record distinguishes component checks from live audio behavior. The
-experiment is excluded from the normal module build. No relay graph or RD/WR
-transfer has been opened, and no receiver-latency result is claimed.
+This record distinguishes earlier component checks from live audio behavior.
+The experiment is excluded from ordinary module packages and is available
+through explicit optional packaging. Subsequent controlled in-HAL development
+trials have confirmed attach, owned OPEN, default calibration, MAP,
+event-registration and encoder INIT acknowledgements with the signed DSP
+unchanged. Completed RD/WR forwarding, an applied positive TTP change and
+receiver latency remain unconfirmed. The earlier results below are historical
+component evidence, not a final validation of the changing integrated source.
 
 | Component | Result and scope |
 | --- | --- |
@@ -28,9 +33,10 @@ then restored with the exact previously heard payloads. Final module status
 verified the active native/APK/HAL hashes, original signed DSP and disarmed
 watchdog. This restoration check does not supply new audible proof.
 
-Remaining requirements are documented in [the transport evidence](transport/TRANSPORT-PROOF.md)
-and [the lifecycle contract](TRANSPORT-LIFECYCLE.md): HAL-owned communication,
-authenticated root-side configuration delivery, accepted OLC parent semantics,
-fresh graph/namespace ownership, cache and buffer lifetimes, followed by actual
-encoded-session and receiver timing measurements. Initial settings changes
-remain pending until a fresh owned graph epoch.
+The [transport evidence](transport/TRANSPORT-PROOF.md) and
+[lifecycle contract](TRANSPORT-LIFECYCLE.md) distinguish implemented HAL-owned
+communication, root-authorized configuration delivery and owner guards from
+the remaining validation of complete OLC parent semantics, cache/buffer
+lifetimes, encoded-session forwarding and receiver timing. Settings changes
+remain pending until a fresh owned graph epoch. No final full-source evidence
+has been recorded for the ongoing integration work.

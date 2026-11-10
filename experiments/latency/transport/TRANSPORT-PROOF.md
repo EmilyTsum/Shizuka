@@ -1,11 +1,16 @@
 # Transport evidence and remaining prerequisites
 
-The checked-in transport code only constructs or validates byte strings. It
-does not initialize GPR, open a device, allocate/map memory, create a graph or
-send endpoint commands. Live RD → APSS → WR operation remains unimplemented
-and unvalidated. This document records the evidence needed to implement it
-inside the existing HAL owner. See [the lifetime contract](../TRANSPORT-LIFECYCLE.md)
-for the required state transitions.
+The Python wire helper only constructs or validates byte strings. The later
+[native HAL transport](native/README.md) implements the session state machine
+through host-supplied functions. It contains no GPR initialization, device-open,
+library-loading or graph-creation operation. Its synthetic HAL/DSP tests have
+passed. A controlled real RD → APSS → WR buffer and matching WR_DONE now
+confirm a +150 ms packet TTP change; continuous forwarding remains unvalidated.
+The following timing-free supplemental buffer stalls awaiting WR completion,
+including in a +1 ms comparison. Receiver timing and heard audio are unverified.
+This document
+records the device evidence behind that implementation. See
+[the lifetime contract](../TRANSPORT-LIFECYCLE.md) for the required transitions.
 
 ## Actual driver behavior changes the integration boundary
 
@@ -44,14 +49,17 @@ or RD/WR request was sent. An observed HAL PID change predated MAP; these
 records do not establish that MAP caused a HAL process restart.
 
 Do not repeat these standalone probes, retry the old handle or create a
-second reader. A future relay must use the HAL's already initialized GPR
+second reader. The implemented relay uses the HAL's already initialized GPR
 instance, existing transport descriptor and dispatcher. It may register a
 fresh, owned callback port with `__gpr_cmd_register()` and deregister only that
 port after all its responses and callbacks have drained. It must not call
 `gpr_init()`, `gpr_deinit()` or close the HAL transport. The callback's code and
 state must remain resident while a response can arrive. These APIs are
-exported by the reviewed vendor `libar-gpr.so`; successful attachment and
-callback lifetime management have not been implemented here.
+exported by the reviewed vendor `libar-gpr.so`. The in-HAL runtime implements
+attachment and callback lifetime guards, and actual attach has been confirmed;
+that attachment checkpoint alone does not establish completed RD/WR or all
+teardown behavior. The later single-buffer completion above is a separate,
+narrower-than-continuous forwarding result.
 
 `__gpr_cmd_is_registered()` queries the current process's host callback
 registry. A false result does not reserve a DSP MIID or prove the remote
@@ -132,21 +140,36 @@ It statically identifies the missing property: `0x080010cb`, payload size four,
 payload an owned, nonzero parent/client ID. It does not prove that a chosen
 APSS parent ID works as a complete offload parent.
 
-The public local-domain APM parser logs this property without looking up a
-parent node. Its separate remote-domain satellite-cache path requires an
-existing parent node. The actual satellite helper likewise performs a parent
-lookup at `0xb0245918`; its surrounding domain semantics still need review
-before relying on an APSS-only parent. Do not use a fake arbitrary ID as a
-substitute for implementing the parent's event/state protocol.
+The actual APM helper at `0xb0245834` scans process-domain property `0x08001014`.
+At `0xb024588c` it queries the local GPR domain, and at `0xb0245894..98` it
+compares that with the container domain. Equality returns success immediately
+at `0xb024589c`; only a different domain enters the parent-node lookup at
+`0xb0245918`. Therefore the target container, which remains local ADSP domain
+2, bypasses that remote-parent lookup. This matches the public local-domain
+parser. Actual event routing at `0xb0251f20..2c` loads both domain bytes from
+the registered client, allowing the APSS domain rather than hardcoding ADSP.
+The native transport now implements the reviewed peer-property/state side of
+that parent protocol; [the detailed proof](APSS-PARENT.md) distinguishes these
+static results from the still-required runtime handshakes.
 
 Setting OLC client configuration also changes single-buffering policy across
 the container's existing external ports. Effects on ordinary A2DP pacing,
 upstream/downstream state propagation, offload property events and teardown
-remain unvalidated. The current target is a fresh, normal GSL-owned Adaptive
-SG `0xb00000ab`, container `0xe00000e6`, with only edge
-`0x43fb:1 → 0x43fa:2` split into RD and WR islands. All existing data edges and
-IMCL/control parameters must retain their bytes. No such graph has been
-opened by this experiment.
+remain runtime-unvalidated. The current transform uses a fresh, normal
+GSL-owned Adaptive SG `0xb00000ab`, container `0xe00000e6`. It replaces the
+existing PCM logger `0x43f7` with RD, and encoded logger `0x43fa` with WR.
+`0x43f8 → 0x43fb → RD(0x43f7)` becomes the first island; WR's existing
+`0x43fa → 0x4098` external connection stays intact. This reuses DSP MIIDs
+already owned by that fresh stock SG, rather than inventing new MIIDs. The
+existing container property `0x080010cb=0xffffffff` is replaced in place with
+the owned APSS client port; it is not appended a second time. Logger-specific
+calibration for the replaced nodes must be removed by the same owner. All
+unrelated edges and IMCL/control parameters retain their bytes. The earlier
+`0x535a4101/2` graph plan is superseded. Controlled in-HAL trials have received
+successful OPEN, default-calibration, MAP, event-registration and encoder INIT
+acknowledgements, RD completion and one WR completion with a matching positive
+packet TTP change. Continuous parent/data flow and receiver timing remain
+unconfirmed; an OPEN acknowledgement alone does not resolve them.
 
 ## Endpoint bodies, events and metadata
 
@@ -185,8 +208,8 @@ OLC media-format propagation can use `0x03001009`; another RD path uses
 operating-frame-size `0x03001004` and RD EOS/discontinuity `0x06001001`.
 Do not assume every event is wrapped in `APM_EVENT_MODULE`. Public
 `cu_raise_module_events_to_clients()` routes the registered client's domain,
-port and token and sends the event ID as the packet opcode. A future owner
-must process offload state/property events as well as media format. Raw
+port and token and sends the event ID as the packet opcode. The implemented
+owner processes offload state/property events as well as media format. Raw
 compressed format must be acknowledged at WR before any filled WR buffer.
 
 The reviewed WR metadata loop advances by `24 + payload_size`, without

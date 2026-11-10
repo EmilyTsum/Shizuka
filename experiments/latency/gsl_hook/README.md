@@ -7,6 +7,13 @@ provides no enable or namespace-override API. Every caller, including the three
 future target call sites, currently passes through unchanged. The payload has
 no imports, writable data, runtime relocations, provider reader, or transport.
 
+The separate native relay graph/calibration components added later are not
+linked into that124-byte passthrough payload. Their existing-node replacement,
+56-byte size/fill transaction, immutable graph-epoch setting, ACK/profile gates
+and scoped logger-calibration filter are specified in
+[RELAY-INTEGRATION.md](RELAY-INTEGRATION.md). They require the embedding owner's
+reviewed bootstrap/transport/lifecycle; they perform no device operation alone.
+
 Only source files belong in this directory. Vendor libraries, firmware,
 disassembly dumps, candidates, executables, and generated build evidence are
 not included. Build and patch commands require an explicit output path outside

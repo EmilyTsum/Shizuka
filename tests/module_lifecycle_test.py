@@ -27,17 +27,24 @@ class Lifecycle(unittest.TestCase):
         self.bb = self.d / "bb"
         self.bb.write_text(
             f"#!{sys.executable}\n"
-            + """import fcntl, hashlib, os, pathlib, sys
+            + """import fcntl, hashlib, os, pathlib, stat, sys
 a = sys.argv[1:]
 if a[:3] == ["stat", "-c", "%u"]:
     print(os.environ.get("TEST_OWNER", "0"))
 elif a[:3] == ["stat", "-c", "%u:%a"]:
     import stat
     print(os.environ.get("TEST_OWNER", "0") + ":" + format(stat.S_IMODE(pathlib.Path(a[3]).stat().st_mode), "o"))
+elif a[:3] == ["stat", "-c", "%u:%a:%h"]:
+    s=pathlib.Path(a[3]).stat()
+    print(os.environ.get("TEST_OWNER", "0") + ":" + format(stat.S_IMODE(s.st_mode), "o") + ":" + str(s.st_nlink))
 elif a[0] == "flock":
     # Use a real inherited-FD lock, also on hosts without the flock utility.
     fcntl.flock(int(a[1]), fcntl.LOCK_EX)
+elif a[:6] == ["timeout", "-s", "TERM", "-k", "1", "5"]:
+    os.execvp(a[6], a[6:])
 else:
+    if a[0] == "awk" and a[-1] == "/proc/222/maps" and os.environ.get("TEST_HAL_MAPS"):
+        a[-1]=os.environ["TEST_HAL_MAPS"]
     bb = os.environ.get("SHIZUKA_TEST_BUSYBOX")
     if bb: os.execv(bb, [bb] + a)
     if a[0] == "sha256sum":
@@ -132,7 +139,9 @@ else:
 
     def test_recovery_pending_includes_orphaned_mount_and_qhs_records(self):
         self.run_shell("recovery_pending", ok=False)
-        for name in ["active", "armed", "mounts.tsv", "qhs-nvm/intent", "qhs-nvm/restoring"]:
+        for name in ["active", "armed", "mounts.tsv", "qhs-nvm/intent", "qhs-nvm/restoring",
+                     "latency-runtime.active", "latency-remote-uncertain", "latency-provider.pid",
+                     "latency-provider.start", "dsp-trial.active"]:
             with self.subTest(record=name):
                 path = self.pending_record(name)
                 self.run_shell("recovery_pending")
@@ -140,6 +149,304 @@ else:
                 self.run_shell("recovery_pending", ok=False)
         (self.state / "mounts.tsv").touch()
         self.run_shell("recovery_pending", ok=False)
+
+    def test_broken_latency_ownership_markers_still_fence_activation(self):
+        for name in ["latency-runtime.active", "latency-remote-uncertain", "active", "armed", "mounts.tsv", "latency-provider.pid"]:
+            with self.subTest(record=name):
+                marker = self.state / name
+                marker.symlink_to(self.state / "missing")
+                self.run_shell("recovery_pending")
+                marker.unlink()
+
+    def application_fixture(self, *, unresolved=True):
+        directory = self.state / "latency-application"
+        directory.mkdir(mode=0o700)
+        (directory / "history").write_text("Protected terminal history must remain\n")
+        if unresolved:
+            (directory / "unresolved").touch()
+        helper = self.d / "latency-apply-fence.sh"
+        helper.write_text('''#!/bin/sh
+MODDIR=${0%/*}; STATE="$MODDIR/state"
+printf '%s\n' "$1" >> "$MODDIR/fence-calls"
+case "$1" in
+ check|health) [ ! -e "$STATE/latency-application/unresolved" ];;
+ reconcile)
+  [ -e /dev/fd/9 ] || exit 91
+  [ -f "$MODDIR/allow-reconcile" ] || exit 3
+  rm -f "$STATE/latency-application/unresolved"
+  ;;
+ *) exit 92;;
+esac
+''')
+        helper.chmod(0o644)
+        return directory
+
+    def no_audio_mutation(self):
+        return '''
+log() { printf '%s\\n' "$*"; }
+check_inputs() { :; }
+stop_policy() { touch "$MODDIR/forbidden-write";return 95; }
+profile_stop_runtime() { touch "$MODDIR/forbidden-write";return 95; }
+quiesce_radio() { touch "$MODDIR/forbidden-write";return 95; }
+restore_properties() { touch "$MODDIR/forbidden-write";return 95; }
+setprop() { touch "$MODDIR/forbidden-write";return 95; }
+resume_radio() { touch "$MODDIR/forbidden-write";return 95; }
+'''
+
+    def physical_cleanup_fixture(self):
+        (self.state / "active").touch()
+        (self.state / "armed").write_text("current\n")
+        (self.state / "mounts.tsv").write_text("999999 mnt:[1] /stock/unused\n")
+        return '''
+log() { printf '%s\\n' "$*"; }
+event() { printf '%s\\n' "$1" >> "$MODDIR/physical-calls"; }
+stop_policy() { event policy-stop; }
+profile_stop_runtime() { event runtime-stop; }
+qhs_pending() { return 1; }
+quiesce_radio() { event radio-off; }
+host_bt() { :; }
+restore_properties() { event properties; }
+getprop() { echo 222; }
+profile_recover_experiments() { event remote-recover; }
+setprop() { event hal-restart; }
+sleep() { :; }
+profile_hal_ready() { :; }
+profile_finish_runtime_recovery() { event runtime-finalize; }
+resume_radio() { event radio-resume; }
+check_inputs() { :; }
+verify_stock_recovery() { event independently-verified; }
+'''
+
+    def test_application_fence_is_pending_without_treating_terminal_history_as_physical(self):
+        directory = self.application_fixture()
+        self.run_shell("recovery_pending")
+        self.run_shell("physical_recovery_pending", ok=False)
+        (directory / "unresolved").unlink()
+        self.run_shell("recovery_pending", ok=False)
+        self.assertTrue((directory / "history").exists())
+
+    def test_activation_commit_and_keep_fence_after_acquiring_lifecycle_lock(self):
+        directory = self.application_fixture()
+        entry = CONTROL[CONTROL.index("# Serialize activation") : CONTROL.index("quiesce_radio()")]
+        helper = self.d / "latency-apply-fence.sh"
+        helper.write_text(helper.read_text().replace('case "$1" in', '[ -e /dev/fd/9 ] || exit 91\ncase "$1" in'))
+        for command in ("activate", "commit", "keep-verified"):
+            with self.subTest(command=command):
+                self.run_shell(f"set -- {command}\n" + entry + '\ntouch "$MODDIR/forbidden-write"', ok=False)
+                self.assertFalse((self.d / "forbidden-write").exists())
+        (directory / "unresolved").unlink()
+        self.run_shell("set -- keep-verified\n" + entry + '\ntouch "$MODDIR/allowed-after-fence"')
+        self.assertTrue((self.d / "allowed-after-fence").exists())
+
+    def test_unsafe_reader_cannot_authorize_or_execute_an_application_check(self):
+        self.application_fixture()
+        helper = self.d / "latency-apply-fence.sh"
+        helper.chmod(0o666)
+        self.run_shell("application_fence check", ok=False)
+        self.assertFalse((self.d / "fence-calls").exists())
+        helper.chmod(0o644)
+        (self.d / "linked-reader").hardlink_to(helper)
+        self.run_shell("application_fence check", ok=False)
+        self.assertFalse((self.d / "fence-calls").exists())
+
+    def test_app_only_unknown_or_old_boot_never_replays_radio_or_other_user_state(self):
+        directory = self.application_fixture()
+        (directory / "old-boot").write_text("previous boot\n")
+        (self.state / "radio-on").write_text("1\n")
+        result = self.run_shell(RECOVERY + self.no_audio_mutation() + "\nlock_lifecycle\nrollback", ok=False)
+        self.assertIn("no audio state was changed", result.stdout)
+        self.assertFalse((self.d / "forbidden-write").exists())
+        self.assertTrue((directory / "unresolved").exists())
+        self.assertEqual((self.state / "radio-on").read_text(), "1\n")
+        (self.d / "latency-apply-fence.sh").unlink()  # Missing reader stays fenced too.
+        self.run_shell(RECOVERY + self.no_audio_mutation() + "\nlock_lifecycle\nrollback", ok=False)
+        self.assertFalse((self.d / "forbidden-write").exists())
+        self.assertTrue((directory / "old-boot").exists())
+
+    def test_app_only_reconciliation_inherits_lock_without_touching_audio(self):
+        directory = self.application_fixture()
+        (self.d / "allow-reconcile").touch()
+        self.run_shell(RECOVERY + self.no_audio_mutation() + "\nlock_lifecycle\nrollback")
+        self.assertFalse((self.d / "forbidden-write").exists())
+        self.assertFalse((directory / "unresolved").exists())
+        self.assertIn("reconcile", (self.d / "fence-calls").read_text().splitlines())
+
+    def test_late_application_failure_retires_only_verified_physical_markers_and_never_cycles_again(self):
+        directory = self.application_fixture()
+        fixture = self.physical_cleanup_fixture()
+        first = self.run_shell(RECOVERY + fixture + "\nlock_lifecycle\nrollback", ok=False)
+        self.assertIn("stock audio recovery verified", first.stdout)
+        events = (self.d / "physical-calls").read_text()
+        self.assertTrue(events.endswith("independently-verified\n"))
+        self.assertFalse((self.state / "active").exists())
+        self.assertFalse((self.state / "armed").exists())
+        self.assertEqual((self.state / "mounts.tsv").read_text(), "")
+        self.assertTrue((directory / "unresolved").exists())
+        self.run_shell(RECOVERY + fixture + "\nlock_lifecycle\nrollback", ok=False)
+        self.assertEqual((self.d / "physical-calls").read_text(), events)
+        self.run_shell(RECOVERY + fixture + "\nlock_lifecycle\nrollback health current")
+        self.assertEqual((self.d / "physical-calls").read_text(), events)
+        self.assertFalse((self.d / ".no-auto").exists())
+        self.run_shell("recovery_pending")
+        self.run_shell("physical_recovery_pending", ok=False)
+
+    def test_late_success_requires_physical_verification_before_receipt_completion(self):
+        directory = self.application_fixture()
+        fixture = self.physical_cleanup_fixture() + '\nverify_stock_recovery() { event independently-verified;touch "$MODDIR/allow-reconcile"; }\n'
+        self.run_shell(RECOVERY + fixture + "\nlock_lifecycle\nrollback")
+        self.assertFalse((directory / "unresolved").exists())
+        self.assertEqual((self.d / "fence-calls").read_text().splitlines().count("reconcile"), 2)
+        self.assertFalse((self.state / "armed").exists())
+
+    def test_failed_independent_physical_proof_preserves_physical_markers_and_app_fence(self):
+        directory = self.application_fixture()
+        fixture = self.physical_cleanup_fixture() + '\nverify_stock_recovery() { event proof-failed;return 43; }\n'
+        self.run_shell(RECOVERY + fixture + "\nlock_lifecycle\nrollback", ok=False)
+        for name in ("active", "armed", "mounts.tsv"):
+            self.assertTrue((self.state / name).exists())
+        self.assertTrue((self.state / "mounts.tsv").read_text())
+        self.assertTrue((directory / "unresolved").exists())
+        self.assertEqual((self.d / "fence-calls").read_text().splitlines().count("reconcile"), 1)
+
+    def stock_verification_fixture(self):
+        stock = self.d / "stock"
+        stock.mkdir()
+        names = ("native.so", "hal.so", "Bluetooth.apk", "offload.xml", "framework.xml")
+        paths = [stock / name for name in names]
+        import hashlib
+        (self.d / "inputs.sha256").write_text("".join(
+            hashlib.sha256((name + " original").encode()).hexdigest() + " " + str(path) + "\n"
+            for name, path in zip(names, paths)
+        ))
+        for name, path in zip(names, paths):
+            path.write_text(name + " original")
+        maps = self.d / "hal-maps"
+        maps.write_text(str(paths[1]) + "\n/vendor/lib64/libar-gsl.so\n")
+        self.env["TEST_HAL_MAPS"] = str(maps)
+        for name, source in {
+            "dumpsys": '''#!/bin/sh
+printf 'binder %s\\n' "$2" >> "$MODDIR/stock-events"
+[ "$2" != "${MISSING_BINDER:-}" ] || exit 17
+echo 222
+''',
+            "service": '''#!/bin/sh
+printf 'ping %s\\n' "$2" >> "$MODDIR/stock-events"
+[ "$2" != "${MISSING_BINDER:-}" ] || exit 18
+echo 'Result: Parcel(00000000)'
+''',
+        }.items():
+            path = self.d / name
+            path.write_text(source)
+            path.chmod(0o755)
+        return f'''
+export MODDIR
+NATIVE={shlex.quote(str(paths[0]))};HAL={shlex.quote(str(paths[1]))};APK={shlex.quote(str(paths[2]))}
+OFFLOAD={shlex.quote(str(paths[3]))};FRAMEWORK={shlex.quote(str(paths[4]))}
+next_hal=222;previous_hal=221
+check_inputs() {{ :; }}
+allowed() {{ profile_target_allowed "$1"; }}
+host_zygote() {{ echo 111; }}
+host_bt() {{ if [ "${{TEST_RADIO_OFF:-0}}" != 1 ];then echo 333;fi; }}
+getprop() {{ echo 222; }}
+process_start() {{ case "$1" in 111) echo 100;;222) echo 200;;333) echo 300;;*) return 1;;esac; }}
+profile_latency_recovery_preflight() {{ [ "${{TEST_BAD_DSP:-0}}" != 1 ]; }}
+profile_latency_dsp_state() {{ echo running; }}
+cat() {{
+ if [ "$1" = /proc/sys/kernel/random/boot_id ];then echo 11111111-2222-3333-abcd-555555555555
+ else command cat "$@";fi
+}}
+nsrun() {{
+ printf 'namespace %s %s\\n' "$1" "$4" >> "$MODDIR/stock-events"
+ if [ "$4" = /vendor/lib64/libar-gsl.so ];then
+  echo 4d7219f3d1e167c29548aebac62d827c17ef88e5f46be4831d9dd1c003caf6bc
+ elif [ "$1:$4" = "${{TEST_BAD_NAMESPACE:-}}" ];then
+  echo ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+ else "$BB" sha256sum "$4";fi
+}}
+'''
+
+    def test_independent_stock_boundary_checks_all_three_binders_and_live_core_namespaces(self):
+        fixture = self.stock_verification_fixture()
+        body = RECOVERY + fixture + "\nverify_stock_recovery"
+        self.run_shell(body)
+        events = (self.d / "stock-events").read_text().splitlines()
+        expected = ["android.hardware.audio.core.IModule/default", "android.hardware.audio.effect.IFactory/default",
+                    "vendor.samsung.hardware.bluetooth.audio.IBluetoothAudioProviderFactory/default"]
+        # Use the profile's exact Samsung factory spelling instead of a guessed alias.
+        factory = self.run_shell('printf "%s" "$AUDIO_HAL_FACTORY"').stdout
+        expected[-1] = factory
+        for name in expected:
+            self.assertIn("binder " + name, events)
+            self.assertIn("ping " + name, events)
+        for pid, name in ((1, "native.so"), (111, "native.so"), (333, "Bluetooth.apk"), (222, "hal.so")):
+            self.assertIn(f"namespace {pid} {self.d}/stock/{name}", events)
+        for name in expected:
+            with self.subTest(missing_binder=name):
+                self.env["MISSING_BINDER"] = name
+                self.run_shell(body, ok=False)
+        self.env.pop("MISSING_BINDER")
+        for pid, name in ((111, "native.so"), (333, "Bluetooth.apk"), (222, "hal.so")):
+            with self.subTest(bad_namespace=pid):
+                self.env["TEST_BAD_NAMESPACE"] = f"{pid}:{self.d}/stock/{name}"
+                self.run_shell(body, ok=False)
+        self.env.pop("TEST_BAD_NAMESPACE")
+        self.env["TEST_BAD_DSP"] = "1"
+        self.run_shell(body, ok=False)
+
+    def test_stock_boundary_preserves_radio_off_and_rejects_unfinished_ownership(self):
+        fixture = self.stock_verification_fixture()
+        self.env["TEST_RADIO_OFF"] = "1"
+        self.run_shell(RECOVERY + fixture + "\nverify_stock_recovery")
+        self.assertNotIn("namespace 333", (self.d / "stock-events").read_text())
+        for name in ("latency-remote-uncertain", "latency-runtime.active", "latency-provider.pid", "dsp-trial.active", "qhs-nvm/intent"):
+            with self.subTest(marker=name):
+                path = self.pending_record(name)
+                self.run_shell(RECOVERY + fixture + "\nverify_stock_recovery", ok=False)
+                self.assertTrue(path.exists())
+                path.unlink()
+
+    def test_recovery_waits_for_full_hal_and_finalization_before_clearing_state(self):
+        fixture = """
+stop_policy() { :; }
+profile_stop_runtime() { :; }
+qhs_pending() { return 1; }
+quiesce_radio() { :; }
+host_bt() { :; }
+restore_properties() { :; }
+getprop() { echo 222; }
+profile_recover_experiments() { :; }
+setprop() { :; }
+sleep() { :; }
+check_inputs() { :; }
+resume_radio() { touch "$MODDIR/radio-resumed"; }
+profile_finish_runtime_recovery() { touch "$MODDIR/finish-attempted";return 43; }
+"""
+        for ready in [False, True]:
+            with self.subTest(hal_ready=ready):
+                (self.state / "active").touch()
+                (self.state / "armed").write_text("pending\n")
+                self.run_shell(RECOVERY + fixture +
+                    ("profile_hal_ready() { :; }\n" if ready else "profile_hal_ready() { return 1; }\n") +
+                    "lock_lifecycle\nrollback", ok=False)
+                self.assertTrue((self.state / "active").exists())
+                self.assertTrue((self.state / "armed").exists())
+                self.assertEqual((self.d / "finish-attempted").exists(), ready)
+                self.assertFalse((self.d / "radio-resumed").exists())
+
+    def test_radio_resume_timeout_is_not_reported_as_success(self):
+        resume = CONTROL[CONTROL.index("resume_radio()") : CONTROL.index("start_health()")]
+        (self.state / "radio-on").write_text("1\n")
+        fixture = """
+cmd() { touch "$MODDIR/radio-attempted"; }
+dumpsys() { echo '  State: OFF'; }
+sleep() { :; }
+"""
+        self.run_shell(resume + fixture + "resume_radio", ok=False)
+        self.assertTrue((self.d / "radio-attempted").exists())
+        (self.d / "radio-attempted").unlink()
+        (self.state / "radio-on").write_text("0\n")
+        self.run_shell(resume + fixture + "resume_radio")
+        self.assertFalse((self.d / "radio-attempted").exists())
 
     def test_activation_refuses_to_overwrite_unfinished_recovery(self):
         body = CONTROL.split("\n activate)\n", 1)[1]

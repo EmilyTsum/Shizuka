@@ -8,13 +8,16 @@ Material components. Versions are pinned in `build.gradle`.
 All user-facing text is English. The interface follows Android settings:
 a connection overview opens playback, additional delay, DSP status, diagnostics
 and module pages. The app supports system dark mode, scalable system text and
-window insets. It connects only to the temporary module-owned root session opened by KernelSU Action.
+window insets. Its normal launcher icon opens the app and requests the user's
+standard KernelSU root permission to connect to the installed module. Optional
+Action and module-settings entries remain compatible.
 
-This APK is the KernelSU module's internal native interface. It has no launcher
-intent, no app-drawer entry and no independent recent-apps entry. KernelSU's
-module Action installs/opens the explicit activity; module uninstall removes it.
-When the module or root access is unavailable, the interface shows a blocking
-unavailable screen instead of standalone settings or cached observations.
+This APK remains owned by the KernelSU module; module uninstall removes it.
+The app has no boot receiver. A fixed, bounded settings-bootstrap.sh command
+checks its own UID and installed APK identity and starts only the module's UI
+bridge. It never activates audio or changes settings on launch. Missing,
+disabled or mismatched modules and denied root requests show English guidance
+and an explicit Retry connection, without presenting cached data as current.
 
 ## Build
 
@@ -40,16 +43,20 @@ persistent key location. This is a local-build identity, not a release authority
   copied to a user-selected Storage Access Framework document.
 - `control.sh status|rollback` and `apply.sh`: explicit module maintenance only.
 
-Every operation runs off the UI thread. The app does not invoke su or require
-an independent KernelSU Superuser grant. Action supplies a temporary random
-abstract LocalSocket session through the shizuka_socket intent extra.
+Every root operation runs off the UI thread. Normal launch invokes only the
+fixed /system/bin/su command for the app's own numeric UID and requires normal
+KernelSU Superuser approval. It never edits that policy. The privileged command
+has a 15-second timeout; the app bounds the full connection attempt including
+the prompt to 45 seconds and 16 KiB of output. Optional Action supplies the
+same temporary random abstract LocalSocket through shizuka_socket.
 The client requires server peer UID 0; the bridge authenticates the companion
 UID and allowlists scripts/arguments. Each request/response has a bounded
 length-prefixed JSON frame; archive responses stream a bounded binary body.
-Expired or missing sessions show an unavailable screen and require reopening
-KernelSU Action. No root command is triggered by an
-untrusted intent or exported service. The non-exported activity is opened
-explicitly by the root module Action; no intent extras run a command or change a setting.
+Expired or missing sessions show an unavailable screen with an explicit
+connection retry. The exported launcher activity accepts no command or path
+from an intent. A normal app connection uses the single fixed bootstrap;
+provided socket names are strictly checked and the peer must be root. Opening
+the activity or accepting a socket never applies a setting or starts audio.
 The API scripts are allowlisted on both sides of the bridge. Capture/session
 IDs and binary archive paths are validated before use.
 

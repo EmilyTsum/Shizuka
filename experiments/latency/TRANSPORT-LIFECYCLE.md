@@ -1,7 +1,14 @@
 # Live transport and temporary-root session contract
 
-This specifies requirements for a future owner. The file transform implements
-no live GPR transport, graph creation or teardown.
+This describes the implemented in-HAL owner and root-side lease provider,
+including the ownership rules still being validated on the phone. The separate
+file-transform CLI performs no live GPR, graph creation or teardown. The signed
+DSP remains unchanged.
+
+Controlled in-HAL trials have confirmed attach, an owned graph OPEN,
+default-calibration handling, MAP and endpoint-event registration, and accepted
+encoder INIT acknowledgements. These checkpoints do not establish completed
+RD/WR forwarding, a positive applied TTP change or receiver playout timing.
 
 ## One HAL transport owner
 
@@ -33,7 +40,9 @@ completion is unknown.
    encoder `0x43fb` → logger `0x43fa` → connection proxy `0x4098`. Preserve its
    IMCL links. RD/WR require OLC/offload-info setup. Static firmware analysis
    identifies parent-container property `0x080010cb` as its creation path;
-   APSS-as-parent and same-container disjoint-path pacing remain unvalidated.
+   Graph OPEN with that parent setup has been acknowledged; complete APSS
+   parent event propagation and same-container disjoint-path pacing remain
+   unvalidated.
    A size query and its blob fill must describe the same revision. Failure
    after advertising extra space aborts this open.
 3. **Own mappings.** Allocate bounded private slots, record their actual OSAL
@@ -61,7 +70,7 @@ Data and metadata spans within a slot are bounded by its recorded capacity.
 | --- | --- |
 | CPU owned | The OSAL allocation has CPU START ownership. Complete host preparation, then issue CPU END before RD submission. |
 | RD in flight | DSP owns the slot. Host must not read, modify, free or submit it again. |
-| RD complete | Accept the matching successful RD_DONE, then CPU START. Validate complete data and metadata. Read one immutable configuration snapshot and positively gate the actual profile. |
+| RD complete | Accept the matching successful RD_DONE, then CPU START. Validate complete data and metadata. Use the graph epoch's frozen configuration snapshot and positively gate the actual profile. |
 | CPU transform | Validate every wrapper before publishing output. Use that one delta for all wrappers, preserve secondary zero TTP and reject overflow/unknown metadata atomically. No config reread between split-channel wrappers. |
 | WR in flight | CPU END precedes WR submission. Keep data, metadata and the snapshot alive until matching successful WR_DONE acknowledges both. |
 | Reusable | Only confirmed WR completion releases the slot. Establish CPU START before any further host access or vendor free; a later DSP submission requires CPU END again. |
@@ -73,19 +82,22 @@ Lossless. Display the requested setting separately from the transformed packet
 TTP and measured receiver behavior.
 
 Atomic buffer snapshots alone do not establish that an arbitrary delay change
-is safe during playback. The initial live provider must freeze the accepted
+is safe during playback. The implemented owner freezes the accepted
 delta for a graph epoch; a new saved value remains pending until a fresh owned
 session. Each buffer uses that accepted immutable value. Midstream updates need
 separate receiver/timeline validation, especially when reducing the delta.
 
 The file reader is a root-side component: `/data/adb/shizuka/config.conf` is
 root-owned mode 0600 inside a mode-0700 directory. The actual HAL runs as
-`audioserver`, so an in-HAL owner cannot read that file directly. A future
-authenticated root/HAL provider must deliver an immutable typed snapshot bound
-to the current session and revision. The buffer worker retains that snapshot
-through WR completion; missing or expired authority rejects further work.
-This provider is not implemented. Do not weaken file permissions, grant the
-HAL root or treat successful root-side file tests as proof of this boundary.
+`audioserver`, so the in-HAL owner does not read that file directly. The
+implemented root provider publishes a bounded, versioned lease in
+`/data/vendor/audio/shizuka/provider.bin`, root:audio mode 0640, within a mode
+0750 directory. The in-HAL reader validates the build cookie, boot, HAL
+identity, format, integrity and expiry, then freezes the typed value for its
+owned graph epoch. Every buffer retains that value through WR completion;
+missing or expired authority rejects further work. The private configuration
+is not made world-readable and the HAL is not granted root. A valid lease alone
+does not prove graph readiness, buffer forwarding or an applied delay.
 
 ## Removal, expiry and uncertain cleanup
 
