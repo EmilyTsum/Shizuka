@@ -39,6 +39,17 @@ int main() {
     a->buffering[3] = 50;
     a->sample_rate = 96000;
     assert(s25::adaptive_valid(cfg));
-    puts("layout: bounded R2.2/44.1/HQ stability profile, unsupported depth/rate/mode rejection, "
-         "standard Adaptive preserved");
+    // Margin trial: minHQ buffering[2] = 100 (floor 110 ms) is accepted for
+    // the same bounded 44.1/HQ profile; an out-of-envelope value is not.
+    // (The blocks above rewrote stream[] and left sample_rate at 96000;
+    // restore the 44.1/HQ state before re-entering the 44.1 checks.)
+    stream[1] = 0x97;
+    a->sample_rate = 44100;
+    a->buffering[2] = 100;
+    a->buffering[3] = 100;
+    assert(s25::adaptive_valid(cfg));
+    a->buffering[2] = 101;
+    assert(!s25::adaptive_valid(cfg));
+    puts("layout: bounded R2.2/44.1/HQ stability profile, minHQ margin-trial profile, "
+         "unsupported depth/rate/mode rejection, standard Adaptive preserved");
 }
